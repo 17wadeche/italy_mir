@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Italy MIR Helper",
+  "version": "1.0.0",
+  "description": "Italy MIR Helper",
+  "permissions": [
+    "storage",
+    "downloads",
+    "debugger"
+  ],
+  "host_permissions": [
+    "https://crmstage.medtronic.com/*",
+    "https://sisn.salute.gov.it/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://crmstage.medtronic.com/*"
+      ],
+      "js": [
+        "content-crm.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://sisn.salute.gov.it/*"
+      ],
+      "js": [
+        "content-sisn.js"
+      ],
+      "run_at": "document_idle",
+      "css": [
+        "styles.css"
+      ]
+    }
+  ]
+}

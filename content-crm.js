@@ -1,0 +1,403 @@
+'use strict';
+(() => {
+  const REQUIRED_BCC = 'RS.ITALYMIRREPORTS@MEDTRONIC.COM';
+  const POPUP_ID = 'mir-helper-popup';
+  const CHECK_INTERVAL_MS = 1200;
+  const XML_TEXT_RE = /\.xml\b/i;
+  let userDismissed = false;
+  let lastConditionState = false;
+  let popupHideTimer = null;
+  console.info('[Italy MIR Helper] CRM content script loaded:', {
+    url: location.href,
+    frame: window.top === window ? 'top' : 'iframe'
+  });
+  function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+  function normalize(value) {
+    return String(value || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  }
+  function getElementText(el) {
+    if (!el) return '';
+    return [
+      el.innerText,
+      el.textContent,
+      el.value,
+      el.title,
+      el.alt,
+      el.name,
+      el.id,
+      el.getAttribute?.('aria-label'),
+      el.getAttribute?.('href')
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+  function getPageSearchText() {
+    const parts = [];
+    if (document.body) {
+      parts.push(document.body.innerText || document.body.textContent || '');
+    }
+    document.querySelectorAll('input, textarea, select, option').forEach((el) => {
+      parts.push(getElementText(el));
+    });
+    document.querySelectorAll('[title], [aria-label], a[href], [onclick], [ondblclick]').forEach((el) => {
+      parts.push(getElementText(el));
+    });
+    return normalize(parts.join('\n'));
+  }
+  function hasRequiredBcc() {
+    return getPageSearchText().includes(REQUIRED_BCC);
+  }
+  function isVisibleElement(el) {
+    if (!el || !(el instanceof Element)) return false;
+    const style = window.getComputedStyle(el);
+    if (style.visibility === 'hidden' || style.display === 'none' || style.opacity === '0') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+  function xmlNameFromText(text) {
+    const match = String(text || '').match(/[^\n\r;|<>]*?\.xml\b/i);
+    return match ? match[0].trim() : '';
+  }
+  function makeTextRange(textNode, start, end) {
+    try {
+      const range = document.createRange();
+      range.setStart(textNode, Math.max(0, start));
+      range.setEnd(textNode, Math.min(textNode.nodeValue.length, end));
+      return range;
+    } catch (_) {
+      return null;
+    }
+  }
+  function textNodeIsVisible(textNode) {
+    const parent = textNode.parentElement;
+    if (!isVisibleElement(parent)) return false;
+    const text = textNode.nodeValue || '';
+    const xmlIndex = text.search(XML_TEXT_RE);
+    if (xmlIndex < 0) return false;
+    const range = makeTextRange(textNode, Math.max(0, xmlIndex - 8), Math.min(text.length, xmlIndex + 4));
+    if (!range) return false;
+    const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+    range.detach?.();
+    return rects.length > 0;
+  }
+  function findXmlTextTargets() {
+    if (!document.body) return [];
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode(node) {
+          const text = node.nodeValue || '';
+          if (!XML_TEXT_RE.test(text)) return NodeFilter.FILTER_REJECT;
+          if (!node.parentElement) return NodeFilter.FILTER_REJECT;
+          if (!textNodeIsVisible(node)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+    const targets = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.nodeValue || '';
+      const xmlIndex = text.search(XML_TEXT_RE);
+      const start = Math.max(0, xmlIndex - 8);
+      const end = Math.min(text.length, xmlIndex + 4);
+      const range = makeTextRange(node, start, end);
+      if (!range) continue;
+      const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+      range.detach?.();
+      for (const rect of rects) {
+        const point = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2
+        };
+        const elementAtPoint = document.elementFromPoint(point.x, point.y);
+        const element = elementAtPoint || node.parentElement;
+        targets.push({
+          text,
+          xmlName: xmlNameFromText(text),
+          textNode: node,
+          element,
+          parent: node.parentElement,
+          rect,
+          point
+        });
+      }
+    }
+    targets.sort((a, b) => {
+      const aArea = a.rect.width * a.rect.height;
+      const bArea = b.rect.width * b.rect.height;
+      return aArea - bArea;
+    });
+    return targets;
+  }
+  function findXmlElementTargets() {
+    const selector = [
+      'a',
+      'button',
+      '[role="button"]',
+      '[onclick]',
+      '[ondblclick]',
+      'span',
+      'td',
+      'div',
+      'input',
+      'textarea'
+    ].join(',');
+    return Array.from(document.querySelectorAll(selector))
+      .filter(isVisibleElement)
+      .map((el) => {
+        const text = getElementText(el);
+        const xmlName = xmlNameFromText(text);
+        const rect = el.getBoundingClientRect();
+        return { el, text, xmlName, rect, normalized: normalize(text) };
+      })
+      .filter(({ normalized, xmlName }) => Boolean(xmlName) || /\.XML\b/.test(normalized))
+      .filter(({ rect }) => rect.width > 0 && rect.height > 0)
+      .sort((a, b) => {
+        const aClickable = a.el.matches('a, button, [role="button"], [onclick], [ondblclick]') ? 0 : 1;
+        const bClickable = b.el.matches('a, button, [role="button"], [onclick], [ondblclick]') ? 0 : 1;
+        if (aClickable !== bClickable) return aClickable - bClickable;
+        return (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height);
+      });
+  }
+  function findXmlAttachmentTarget() {
+    const textTargets = findXmlTextTargets();
+    if (textTargets.length) return { type: 'text-point', ...textTargets[0] };
+    const elementTargets = findXmlElementTargets();
+    if (elementTargets.length) {
+      const first = elementTargets[0];
+      return {
+        type: 'element',
+        element: first.el,
+        parent: first.el,
+        xmlName: first.xmlName,
+        text: first.text,
+        rect: first.rect,
+        point: {
+          x: first.rect.left + first.rect.width / 2,
+          y: first.rect.top + first.rect.height / 2
+        }
+      };
+    }
+    return null;
+  }
+  function hasXmlAttachment() {
+    return Boolean(findXmlAttachmentTarget());
+  }
+  function removePopup() {
+    if (popupHideTimer) {
+        window.clearTimeout(popupHideTimer);
+        popupHideTimer = null;
+    }
+    document.getElementById(POPUP_ID)?.remove();
+  }
+  function setStatus(message, isError = false, autoDismissMs = 0) {
+    const status = document.getElementById('mir-helper-status');
+    if (!status) return;
+    if (popupHideTimer) {
+        window.clearTimeout(popupHideTimer);
+        popupHideTimer = null;
+    }
+    status.textContent = message;
+    status.style.color = isError ? '#b00020' : '#17324d';
+    if (!isError && autoDismissMs > 0) {
+        popupHideTimer = window.setTimeout(() => {
+        const currentStatus = document.getElementById('mir-helper-status');
+        if (currentStatus && currentStatus.textContent === message) {
+            userDismissed = true;
+            document.getElementById(POPUP_ID)?.remove();
+        }
+        popupHideTimer = null;
+        }, autoDismissMs);
+    }
+  }
+  function eventOptions(point, detail = 1) {
+    return {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      detail,
+      clientX: Math.round(point.x),
+      clientY: Math.round(point.y),
+      screenX: Math.round(window.screenX + point.x),
+      screenY: Math.round(window.screenY + point.y)
+    };
+  }
+  function dispatchMouseSequence(el, point, detail = 1) {
+    if (!el) return;
+    for (const eventName of ['mouseover', 'mousemove', 'mousedown', 'mouseup', 'click']) {
+      el.dispatchEvent(new MouseEvent(eventName, eventOptions(point, detail)));
+    }
+  }
+  function dispatchPointerSequence(el, point, detail = 1) {
+    if (!el || typeof PointerEvent === 'undefined') return;
+    for (const eventName of ['pointerover', 'pointermove', 'pointerdown', 'pointerup']) {
+      el.dispatchEvent(new PointerEvent(eventName, {
+        ...eventOptions(point, detail),
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true,
+        button: 0,
+        buttons: eventName.endsWith('down') ? 1 : 0
+      }));
+    }
+  }
+  function uniqueElements(elements) {
+    const seen = new Set();
+    return elements.filter((el) => {
+      if (!el || seen.has(el)) return false;
+      seen.add(el);
+      return true;
+    });
+  }
+  function usefulClickAncestors(el) {
+    const results = [];
+    let cur = el;
+    let depth = 0;
+    while (cur && cur instanceof Element && depth < 6) {
+      if (
+        cur.matches('a, button, [role="button"], [onclick], [ondblclick], span, td, tr, div') &&
+        isVisibleElement(cur)
+      ) {
+        results.push(cur);
+      }
+      cur = cur.parentElement;
+      depth += 1;
+    }
+    return uniqueElements(results);
+  }
+  async function clickXmlAttachment(targetInfo) {
+    const point = targetInfo.point;
+    const startElement = document.elementFromPoint(point.x, point.y) || targetInfo.element || targetInfo.parent;
+    const clickTargets = uniqueElements([
+      startElement,
+      targetInfo.element,
+      targetInfo.parent,
+      ...usefulClickAncestors(startElement),
+      ...usefulClickAncestors(targetInfo.parent)
+    ]);
+    console.info('[Italy MIR Helper] XML click target:', {
+      type: targetInfo.type,
+      xmlName: targetInfo.xmlName,
+      text: String(targetInfo.text || '').slice(0, 120),
+      point,
+      startTag: startElement?.tagName,
+      startText: String(getElementText(startElement) || '').slice(0, 120),
+      targetCount: clickTargets.length
+    });
+    targetInfo.parent?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    await sleep(250);
+    const refreshedElement = document.elementFromPoint(point.x, point.y) || startElement;
+    const finalTargets = uniqueElements([refreshedElement, ...clickTargets]);
+    for (const el of finalTargets) {
+      try { el.focus?.(); } catch (_) {}
+      dispatchPointerSequence(el, point, 1);
+      dispatchMouseSequence(el, point, 1);
+      await sleep(120);
+      dispatchPointerSequence(el, point, 2);
+      dispatchMouseSequence(el, point, 2);
+      el.dispatchEvent(new MouseEvent('dblclick', eventOptions(point, 2)));
+      await sleep(120);
+    }
+    const clickable = finalTargets.find((el) => el.matches?.('a, button, [role="button"], [onclick], [ondblclick]'));
+    if (clickable && typeof clickable.click === 'function') {
+      clickable.click();
+    }
+  }
+  async function startMirFlow() {
+    const targetInfo = findXmlAttachmentTarget();
+    if (!targetInfo) {
+      setStatus('Could not find the XML attachment. Refresh the page and try again.', true);
+      return;
+    }
+    const startButton = document.getElementById('mir-helper-start');
+    if (startButton) startButton.disabled = true;
+    setStatus('Double-clicking the XML filename...');
+    await clickXmlAttachment(targetInfo);
+    setStatus('Opening SISN MIR portal...');
+    chrome.runtime.sendMessage({
+      type: 'MIR_HELPER_OPEN_SISN',
+      xmlName: targetInfo.xmlName || ''
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        setStatus(`Could not open SISN portal: ${chrome.runtime.lastError.message}`, true);
+        if (startButton) startButton.disabled = false;
+        return;
+      }
+      if (!response?.ok) {
+        setStatus(`Could not open SISN portal: ${response?.error || 'unknown error'}`, true);
+        if (startButton) startButton.disabled = false;
+        return;
+      }
+      setStatus(
+        'SISN portal opened. The helper will select the XML file on the upload step.',
+        false,
+        5000
+      );
+    });
+  }
+  function showPopup() {
+    if (userDismissed || document.getElementById(POPUP_ID)) return;
+    const popup = document.createElement('div');
+    popup.id = POPUP_ID;
+    popup.innerHTML = `
+      <div class="mir-helper-title">Italy MIR XML detected</div>
+      <button id="mir-helper-start" class="mir-helper-primary" type="button">
+        Download XML & Open MIR Portal
+      </button>
+      <button id="mir-helper-close" class="mir-helper-secondary" type="button">
+        Dismiss
+      </button>
+      <div id="mir-helper-status" class="mir-helper-status"></div>
+    `;
+    document.documentElement.appendChild(popup);
+    document.getElementById('mir-helper-start')?.addEventListener('click', startMirFlow);
+    document.getElementById('mir-helper-close')?.addEventListener('click', () => {
+      userDismissed = true;
+      removePopup();
+    });
+  }
+  function checkConditions() {
+    const bcc = hasRequiredBcc();
+    const xmlTarget = findXmlAttachmentTarget();
+    const xml = Boolean(xmlTarget);
+    const conditionMet = bcc && xml;
+    if (conditionMet !== lastConditionState) {
+      lastConditionState = conditionMet;
+      if (!conditionMet) userDismissed = false;
+      console.info('[Italy MIR Helper] CRM condition check:', {
+        bcc,
+        xml,
+        conditionMet,
+        xmlName: xmlTarget?.xmlName,
+        xmlTargetType: xmlTarget?.type,
+        url: location.href
+      });
+    }
+    if (conditionMet) {
+      showPopup();
+    } else {
+      removePopup();
+    }
+  }
+  function boot() {
+    checkConditions();
+    const observer = new MutationObserver(() => checkConditions());
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true
+    });
+    window.setInterval(checkConditions, CHECK_INTERVAL_MS);
+  }
+  boot();
+})();
