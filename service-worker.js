@@ -107,29 +107,66 @@ function scoreDownload(item, expectedXmlName) {
   return score;
 }
 async function findLatestCompletedXmlDownload({ sinceMs, expectedXmlName }) {
-  const startedAfter = new Date(Math.max(0, Number(sinceMs || 0) - 15000)).toISOString();
+  const workflowStartMs = Number(sinceMs || 0);
+  const startedAfter = new Date(Math.max(0, workflowStartMs - 2 * 60 * 1000)).toISOString();
   const endTime = Date.now() + MAX_DOWNLOAD_WAIT_MS;
+  function isXmlDownload(item) {
+    return /\.xml$/i.test(basename(item.filename || ''));
+  }
+  function isUsableDownload(item) {
+    return (
+      isXmlDownload(item) &&
+      item.state === 'complete' &&
+      item.filename &&
+      item.exists !== false
+    );
+  }
+  function describe(item) {
+    return {
+      id: item.id,
+      filename: item.filename,
+      basename: basename(item.filename || ''),
+      state: item.state,
+      exists: item.exists,
+      startTime: item.startTime,
+      url: item.url
+    };
+  }
+  async function searchCandidates(query, label) {
+    const items = await downloadsSearch(query);
+    const xmlItems = items
+      .filter(isXmlDownload)
+      .map(describe);
+    console.info(`[Italy MIR Helper] XML download search: ${label}`, {
+      query,
+      totalItems: items.length,
+      xmlItems
+    });
+    return items
+      .filter(isUsableDownload)
+      .sort((a, b) => scoreDownload(a, expectedXmlName) - scoreDownload(b, expectedXmlName));
+  }
   while (Date.now() < endTime) {
-    const items = await downloadsSearch({
+    const candidates = await searchCandidates({
       startedAfter,
       orderBy: ['-startTime'],
-      limit: 100
-    });
-    const candidates = items
-      .filter((item) => /\.xml$/i.test(basename(item.filename || '')))
-      .filter((item) => item.state === 'complete')
-      .filter((item) => item.exists !== false)
-      .sort((a, b) => scoreDownload(a, expectedXmlName) - scoreDownload(b, expectedXmlName));
+      limit: 1000
+    }, 'workflow window');
     if (candidates[0]) {
-      console.info('[Italy MIR Helper] Found XML download:', {
-        filename: candidates[0].filename,
-        url: candidates[0].url,
-        startTime: candidates[0].startTime,
-        expectedXmlName
-      });
+      console.info('[Italy MIR Helper] Found XML download in workflow window:', describe(candidates[0]));
       return candidates[0];
     }
     await sleep(DOWNLOAD_POLL_MS);
+  }
+  const fallbackStartedAfter = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const fallbackCandidates = await searchCandidates({
+    startedAfter: fallbackStartedAfter,
+    orderBy: ['-startTime'],
+    limit: 1000
+  }, 'last 60 minutes fallback');
+  if (fallbackCandidates[0]) {
+    console.warn('[Italy MIR Helper] Using fallback XML download:', describe(fallbackCandidates[0]));
+    return fallbackCandidates[0];
   }
   return null;
 }
@@ -353,16 +390,44 @@ async function handleUploadLatestXml(sender) {
   const expectedXmlName = pending.expectedXmlName || '';
   const download = await findLatestCompletedXmlDownload({ sinceMs, expectedXmlName });
   if (!download?.filename) {
-    throw new Error('Could not find a completed XML download from this workflow. Make sure the SAP XML download finished, then try again.');
+    const recent = await downloadsSearch({
+      orderBy: ['-startTime'],
+      limit: 20
+    });
+    console.warn('[Italy MIR Helper] Recent Chrome downloads:', recent.map((item) => ({
+      id: item.id,
+      filename: item.filename,
+      basename: basename(item.filename || ''),
+      state: item.state,
+      exists: item.exists,
+      startTime: item.startTime,
+      url: item.url
+    })));
+    throw new Error(
+      'Could not find a completed XML download in Chrome download history. Check the service worker console for “Recent Chrome downloads”. The file may have downloaded before the workflow timestamp, been moved, or not been recorded by Chrome.'
+    );
   }
-  const setResult = await setDownloadedFileOnSisnTab(tabId, download.filename);
-  return {
-    ok: true,
-    filename: basename(download.filename),
-    fullPath: download.filename,
-    downloadId: download.id,
-    setResult
-  };
+  try {
+    const setResult = await setDownloadedFileOnSisnTab(tabId, download.filename);
+    return {
+      ok: true,
+      filename: basename(download.filename),
+      fullPath: download.filename,
+      downloadId: download.id,
+      setResult
+    };
+  } catch (error) {
+    const message = error?.message || String(error);
+    if (/DOM\.setFileInputFiles:\s*Not allowed/i.test(message)) {
+      try {
+        chrome.downloads.show(download.id);
+      } catch (_) {}
+      throw new Error(
+        'Chrome blocked automatic XML selection. In chrome://extensions, open Italy MIR Helper > Details, enable “Allow access to file URLs”, reload the extension, then retry. If needed, upload the XML manually from the Downloads folder.'
+      );
+    }
+    throw error;
+  }
 }
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;

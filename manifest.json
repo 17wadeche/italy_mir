@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Italy MIR Helper",
-  "version": "1.0.1",
-  "description": "Italy MIR Helper",
+  "name": "Italy Portal Tool",
+  "version": "1.0.2",
+  "description": "Italy Portal Tool",
   "permissions": [
     "storage",
     "downloads",
@@ -11,7 +11,9 @@
   "host_permissions": [
     "https://crm.medtronic.com/*",
     "https://crmstage.medtronic.com/*",
-    "https://sisn.salute.gov.it/*"
+    "https://cpic1cs.corp.medtronic.com:8008/",
+    "https://sisn.salute.gov.it/*",
+    "file:///*"
   ],
   "background": {
     "service_worker": "service-worker.js"
@@ -20,7 +22,8 @@
     {
       "matches": [
         "https://crm.medtronic.com/*",
-        "https://crmstage.medtronic.com/*"
+        "https://crmstage.medtronic.com/*",
+        "https://cpic1cs.corp.medtronic.com:8008/"
       ],
       "js": [
         "content-crm.js"
