@@ -418,12 +418,19 @@ async function handleUploadLatestXml(sender) {
     };
   } catch (error) {
     const message = error?.message || String(error);
-    if (/DOM\.setFileInputFiles:\s*Not allowed/i.test(message)) {
+    const isSetFileInputNotAllowed =
+      /DOM\.setFileInputFiles/i.test(message) &&
+      (
+        /not allowed/i.test(message) ||
+        /"message"\s*:\s*"Not allowed"/i.test(message) ||
+        /"code"\s*:\s*-32000/i.test(message)
+      );
+    if (isSetFileInputNotAllowed) {
       try {
         chrome.downloads.show(download.id);
       } catch (_) {}
       throw new Error(
-        'Chrome blocked automatic XML selection. In chrome://extensions, open Italy MIR Helper > Details, enable “Allow access to file URLs”, reload the extension, then retry. If needed, upload the XML manually from the Downloads folder.'
+        'Chrome blocked automatic XML selection. Open chrome://extensions > Italy Portal Tool > Details, enable “Allow access to file URLs”, reload the extension, then retry. If needed, upload the XML manually from the Downloads folder.'
       );
     }
     throw error;
