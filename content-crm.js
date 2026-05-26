@@ -367,7 +367,10 @@
   }
   function checkConditions() {
     const bcc = hasRequiredBcc();
-    const xmlTarget = findXmlAttachmentTarget();
+    let xmlTarget = null;
+    if (bcc) {
+      xmlTarget = findXmlAttachmentTarget();
+    }
     const xml = Boolean(xmlTarget);
     const conditionMet = bcc && xml;
     if (conditionMet !== lastConditionState) {
@@ -390,14 +393,27 @@
   }
   function boot() {
     checkConditions();
-    const observer = new MutationObserver(() => checkConditions());
+    let checkScheduled = false;
+    function scheduleCheck() {
+      if (checkScheduled) return;
+      checkScheduled = true;
+      const run = () => {
+        checkScheduled = false;
+        checkConditions();
+      };
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(run, { timeout: 1500 });
+      } else {
+        window.setTimeout(run, 500);
+      }
+    }
+    const observer = new MutationObserver(scheduleCheck);
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
-      characterData: true,
-      attributes: true
+      characterData: true
     });
-    window.setInterval(checkConditions, CHECK_INTERVAL_MS);
+    window.setInterval(scheduleCheck, 5000);
   }
   boot();
 })();

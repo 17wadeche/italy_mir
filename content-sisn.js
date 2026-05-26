@@ -1098,28 +1098,32 @@
   }
   async function runAutomationTick() {
     if (automationRunning) return;
-    const pending = await getPending();
-    if (!pending) return;
-    if (stopIfAttentionDialog()) return;
-    const uploadPage = hasUploadPageText() || hasFileInput();
-    const referencePage = hasReferenceCodePageText();
-    const signature = JSON.stringify({ uploadPage, referencePage, href: location.href });
-    if (signature !== lastPageSignature) {
-      lastPageSignature = signature;
-      console.info('[Italy MIR Helper] SISN page state:', {
-        uploadPage,
-        referencePage,
-        href: location.href,
-        pending
-      });
-    }
     automationRunning = true;
     try {
+      const pending = await getPending();
+      if (!pending) return;
+      if (stopIfAttentionDialog()) return;
+      const uploadPage = hasUploadPageText() || hasFileInput();
+      const referencePage = hasReferenceCodePageText();
+      const signature = JSON.stringify({
+        uploadPage,
+        referencePage,
+        href: location.href
+      });
+      if (signature !== lastPageSignature) {
+        lastPageSignature = signature;
+        console.info('[Italy MIR Helper] SISN page state:', {
+          uploadPage,
+          referencePage,
+          href: location.href,
+          pending
+        });
+      }
       if (uploadPage) {
         await waitFor(() => hasUploadPageText() || hasFileInput(), 45000, 500);
         const continued = await selectDownloadedXmlOnUploadPage();
         if (continued) {
-          showStatus('Waiting for the uploaded report to finish loading...');
+          showStatus('Waiting for the uploaded report to finish loading.');
           await sleep(AFTER_UPLOAD_CONTINUE_DELAY_MS);
           const moduleState = await waitForModuleReportPageOrAttention(45000, 500);
           if (moduleState === 'module') await autoAdvanceModulePages();
@@ -1150,18 +1154,29 @@
   }
   function boot() {
     runAutomationTick();
-    window.setInterval(runAutomationTick, CHECK_INTERVAL_MS);
-    const observer = new MutationObserver(() => {
-      runAutomationTick();
-    });
+    let tickScheduled = false;
+    function scheduleTick() {
+      if (tickScheduled) return;
+      tickScheduled = true;
+      const run = () => {
+        tickScheduled = false;
+        runAutomationTick();
+      };
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(run, { timeout: 1500 });
+      } else {
+        window.setTimeout(run, 500);
+      }
+    }
+    window.setInterval(scheduleTick, 5000);
+    const observer = new MutationObserver(scheduleTick);
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
-      characterData: true,
-      attributes: true
+      characterData: true
     });
-    window.addEventListener('hashchange', runAutomationTick);
-    window.addEventListener('popstate', runAutomationTick);
+    window.addEventListener('hashchange', scheduleTick);
+    window.addEventListener('popstate', scheduleTick);
   }
   boot();
 })();
