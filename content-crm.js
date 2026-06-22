@@ -386,7 +386,9 @@
     const match = cleaned.match(/\bCUS-\d{2,4}-\d+\b/i);
     return match ? match[0].toUpperCase() : '';
   }
-  async function findCusForEvent({ pliNumber }) {
+  async function findCusForEvent({ eventNumber, pliNumber }) {
+    await performQuickSearch(eventNumber);
+    await sleep(4000);
     await expandRegulatoryReports();
     const links = await waitFor(() => {
       const found = findRegulatoryReportLinksByItemNumber(pliNumber);
