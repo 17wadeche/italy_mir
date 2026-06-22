@@ -45,6 +45,33 @@ function tabsCreate(createProperties) {
     });
   });
 }
+function tabsDuplicate(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.duplicate(tabId, (tab) => {
+      const err = chromeLastErrorMessage();
+      if (err) reject(new Error(err));
+      else resolve(tab);
+    });
+  });
+}
+function tabsRemove(tabId) {
+  return new Promise((resolve) => {
+    if (!tabId) {
+      resolve();
+      return;
+    }
+    chrome.tabs.remove(tabId, () => resolve());
+  });
+}
+function tabsSendMessage(tabId, message) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      const err = chromeLastErrorMessage();
+      if (err) reject(new Error(err));
+      else resolve(response);
+    });
+  });
+}
 function downloadsSearch(query) {
   return new Promise((resolve, reject) => {
     chrome.downloads.search(query, (items) => {
@@ -368,14 +395,51 @@ async function setDownloadedFileOnSisnTab(tabId, filePath) {
     if (attached) await debuggerDetach(target);
   }
 }
+async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
+  if (!sourceTabId || !eventInfo?.eventNumber || !eventInfo?.pliNumber) {
+    return { ok: true, cusCode: '', skipped: true };
+  }
+  let duplicateTab = null;
+  try {
+    duplicateTab = await tabsDuplicate(sourceTabId);
+    await sleep(5000);
+    const endTime = Date.now() + 120000;
+    let lastError = '';
+    while (Date.now() < endTime) {
+      try {
+        const response = await tabsSendMessage(duplicateTab.id, {
+          type: 'MIR_HELPER_CRM_FIND_CUS',
+          eventInfo
+        });
+        if (response?.ok) return response;
+        lastError = response?.error || 'Unknown CRM CUS lookup error.';
+      } catch (error) {
+        lastError = error?.message || String(error);
+      }
+      await sleep(1500);
+    }
+    return { ok: false, cusCode: '', error: lastError || 'Timed out waiting for CRM CUS lookup.' };
+  } finally {
+    await tabsRemove(duplicateTab?.id);
+  }
+}
 async function handleOpenSisn(message, sender) {
   const now = Date.now();
+  const sourceTabId = sender?.tab?.id || null;
+  const eventInfo = message?.eventInfo || {};
+  const lookupResult = await lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo });
+  if (!lookupResult?.ok) {
+    console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
+  }
   const payload = {
     value: true,
     createdAt: now,
     sourceUrl: sender?.url || sender?.tab?.url || '',
     expectedXmlName: message?.xmlName || '',
-    crmTabId: sender?.tab?.id || null
+    crmTabId: sourceTabId,
+    eventInfo,
+    cusCode: lookupResult?.cusCode || '',
+    cusLookup: lookupResult || null
   };
   await storageSet({ [PENDING_KEY]: payload });
   const tab = await tabsCreate({ url: SISN_URL, active: true });

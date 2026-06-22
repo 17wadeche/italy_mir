@@ -250,6 +250,128 @@
       }));
     }
   }
+  function getSubjectValue() {
+    const subjectId = document.getElementById('subject_id')?.value;
+    const candidates = [
+      subjectId ? document.getElementById(subjectId) : null,
+      document.querySelector('input.GUIDE-Email[id$="_subjectField"]'),
+      document.querySelector('input[id*="subjectField" i]'),
+      ...Array.from(document.querySelectorAll('input')).filter((el) => /subject/i.test(`${el.id} ${el.name} ${el.className}`))
+    ].filter(Boolean);
+    return candidates.map((el) => el.value || el.getAttribute('value') || '').find(Boolean) || '';
+  }
+  function getEventInfoFromSubject() {
+    const subject = getSubjectValue();
+    const match = String(subject || '').match(/\b0?(\d{8,12})-(\d+)\b/);
+    if (!match) return { subject, eventNumber: '', pliNumber: '' };
+    return {
+      subject,
+      eventNumber: match[1],
+      pliNumber: match[2]
+    };
+  }
+  function findQuickSearchInput() {
+    return document.getElementById('C17_W52_V53_SearchValue') ||
+      document.querySelector('input[id$="_SearchValue"]') ||
+      document.querySelector('input[tempname$="_search_value"]') ||
+      Array.from(document.querySelectorAll('input')).find((el) => /search[_-]?value|quicksearch/i.test(`${el.id} ${el.name} ${el.getAttribute('tempname') || ''}`));
+  }
+  function findQuickSearchGo() {
+    return document.getElementById('C17_W52_V53_QUICKSEARCH') ||
+      Array.from(document.querySelectorAll('a, button, [role="button"], input[type="button"], input[type="submit"]'))
+        .find((el) => isVisibleElement(el) && /^go$/i.test(normalize(getElementText(el))));
+  }
+  function setInputValue(input, value) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (setter) setter.call(input, value);
+    else input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  async function performQuickSearch(eventNumber) {
+    const input = await waitFor(findQuickSearchInput, 30000, 500);
+    if (!input) throw new Error('Could not find the CRM quick-search input.');
+    input.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    input.focus?.();
+    setInputValue(input, eventNumber);
+    await sleep(300);
+    const go = findQuickSearchGo();
+    if (go) {
+      const point = centerOfElement(go);
+      dispatchPointerSequence(go, point);
+      dispatchMouseSequence(go, point);
+      go.click?.();
+    } else {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    }
+  }
+  function centerOfElement(el) {
+    const rect = el.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }
+  async function waitFor(conditionFn, timeoutMs = 20000, intervalMs = 500) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const result = conditionFn();
+      if (result) return result;
+      await sleep(intervalMs);
+    }
+    return null;
+  }
+  function getRegulatoryReportsContainer() {
+    return document.querySelector('.RegulatoryReports') ||
+      Array.from(document.querySelectorAll('div')).find((el) => isVisibleElement(el) && /regulatory report/i.test(getElementText(el)));
+  }
+  async function expandRegulatoryReports() {
+    const container = await waitFor(getRegulatoryReportsContainer, 45000, 500);
+    if (!container) throw new Error('Could not find the CRM Regulatory Report section.');
+    const wrapper = container.querySelector('.data-wrapper');
+    if (wrapper && getComputedStyle(wrapper).display !== 'none') return container;
+    const clicker = container.querySelector('.clicker') || container;
+    clicker.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    clicker.click?.();
+    dispatchMouseSequence(clicker, centerOfElement(clicker));
+    await sleep(1500);
+    return container;
+  }
+  function findEuropeanVigilanceLinks(pliNumber) {
+    const pli = String(pliNumber || '').trim();
+    return Array.from(document.querySelectorAll('.RegulatoryReports .data, .RegulatoryReports a.GUIDE-sideNav, a.GUIDE-sideNav'))
+      .map((el) => {
+        const row = el.matches?.('.data') ? el : el.closest?.('.data');
+        const link = el.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
+        const rowText = getElementText(row || el);
+        return { row, link, rowText };
+      })
+      .filter(({ link, rowText }) => link && /european vigilance/i.test(getElementText(link)) && new RegExp(`\\(${pli.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)\\s*:`, 'i').test(rowText));
+  }
+  function readRbAcknowledgement() {
+    const cell = document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement');
+    const text = (cell ? getElementText(cell) : '') ||
+      getElementText(document.querySelector('[id*="RBAcknowledgement"]'));
+    const cleaned = String(text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    const match = cleaned.match(/\bCUS-\d{2,4}-\d+\b/i);
+    return match ? match[0].toUpperCase() : '';
+  }
+  async function findCusForEvent({ eventNumber, pliNumber }) {
+    await performQuickSearch(eventNumber);
+    await sleep(4000);
+    await expandRegulatoryReports();
+    const links = await waitFor(() => {
+      const found = findEuropeanVigilanceLinks(pliNumber);
+      return found.length ? found : null;
+    }, 30000, 500);
+    if (!links?.length) return { ok: true, cusCode: '', reason: 'No matching European Vigilance PLI link found.' };
+    for (const item of links) {
+      item.link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+      item.link.click?.();
+      dispatchMouseSequence(item.link, centerOfElement(item.link));
+      await sleep(2500);
+      const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
+      if (cusCode) return { ok: true, cusCode };
+    }
+    return { ok: true, cusCode: '', reason: 'Matching European Vigilance reports did not have an RB Acknowledgement #.' };
+  }
   function uniqueElements(elements) {
     const seen = new Set();
     return elements.filter((el) => {
@@ -322,10 +444,12 @@
     if (startButton) startButton.disabled = true;
     setStatus('Double-clicking the XML filename...');
     await clickXmlAttachment(targetInfo);
-    setStatus('Opening SISN MIR portal...');
+    const eventInfo = getEventInfoFromSubject();
+    setStatus(eventInfo.eventNumber ? `Looking up RB Acknowledgement # for event ${eventInfo.eventNumber}-${eventInfo.pliNumber}...` : 'Opening SISN MIR portal...');
     chrome.runtime.sendMessage({
       type: 'MIR_HELPER_OPEN_SISN',
-      xmlName: targetInfo.xmlName || ''
+      xmlName: targetInfo.xmlName || '',
+      eventInfo
     }, (response) => {
       if (chrome.runtime.lastError) {
         setStatus(`Could not open SISN portal: ${chrome.runtime.lastError.message}`, true);
@@ -415,5 +539,12 @@
     });
     window.setInterval(scheduleCheck, 5000);
   }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
+    (async () => findCusForEvent(message.eventInfo || {}))()
+      .then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  });
   boot();
 })();

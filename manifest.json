@@ -6,7 +6,8 @@
   "permissions": [
     "storage",
     "downloads",
-    "debugger"
+    "debugger",
+    "tabs"
   ],
   "host_permissions": [
     "https://crm.medtronic.com/*",

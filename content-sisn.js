@@ -999,6 +999,135 @@
       });
     });
   }
+  function isCusValue(el) {
+    return /^cus$/i.test(String(el?.value || el?.getAttribute?.('value') || '').trim());
+  }
+  function findDirectCusRadioTarget() {
+    const hosts = deepQuerySelectorAll((el) => isDsInputRadio(el))
+      .map((host) => {
+        const hostText = getElementText(host);
+        const input = findRadioInputInside(host);
+        const label = findLabelInside(host);
+        let score = 9999;
+        if (/^cus$/i.test(String(host.getAttribute?.('label') || '').trim())) score = 0;
+        else if (isCusValue(input)) score = 5;
+        else if (/\bcus\b/i.test(hostText) && !/don['’]?t|mfr\s*ref/i.test(hostText)) score = 20;
+        return { host, input, label, score, hostText };
+      })
+      .filter((item) => item.score < 9999)
+      .sort((a, b) => a.score - b.score);
+    if (hosts[0]) {
+      const item = hosts[0];
+      return {
+        method: 'ds-input-radio-cus',
+        host: item.host,
+        input: item.input,
+        label: item.label,
+        targets: uniqueElements([item.input, item.label, item.host].filter(Boolean)),
+        debugText: item.hostText
+      };
+    }
+    const input = deepQuerySelectorAll((el) => el.matches?.('input[type="radio"]') && isCusValue(el))[0];
+    if (input) {
+      const host = input.closest?.('ds-input-radio, label, [role="radio"]') || getRootHost(input);
+      const label = findLabelInside(host);
+      return {
+        method: 'native-radio-value-cus',
+        host,
+        input,
+        label,
+        targets: uniqueElements([input, label, host].filter(Boolean)),
+        debugText: `input[value=${input.value}] ${getElementText(host)}`
+      };
+    }
+    return null;
+  }
+  function checkedDirectRadio(option) {
+    const input = option?.input || findRadioInputInside(option?.host);
+    if (input?.checked) return true;
+    const host = option?.host || getRootHost(input);
+    if (host?.matches?.('[aria-checked="true"]')) return true;
+    if (host?.getAttribute?.('checked') === 'true') return true;
+    if (/\b(checked|selected|active)\b/i.test(host?.className || '')) return true;
+    return false;
+  }
+  async function clickDirectRadioOption(option) {
+    const input = option?.input || findRadioInputInside(option?.host);
+    const label = option?.label || findLabelInside(option?.host);
+    const host = option?.host || getRootHost(input);
+    if (input) {
+      input.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+      input.focus?.();
+      input.click?.();
+      await sleep(150);
+      input.checked = true;
+      input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      if (checkedDirectRadio(option)) return true;
+    }
+    for (const target of uniqueElements([label, host, ...(option?.targets || [])].filter(Boolean))) {
+      clickAt(target);
+      await sleep(150);
+      if (input) {
+        input.checked = true;
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      }
+      if (checkedDirectRadio(option)) return true;
+    }
+    return Boolean(input);
+  }
+  function findCusTextInput() {
+    return deepQuerySelectorAll((el) => {
+      if (!el.matches?.('input[type="text"], input:not([type]), textarea')) return false;
+      if (!isVisible(el) || isDisabled(el)) return false;
+      const joined = [
+        el.id,
+        el.name,
+        el.getAttribute?.('formcontrolname'),
+        el.getAttribute?.('placeholder'),
+        el.getAttribute?.('aria-label'),
+        el.getAttribute?.('label'),
+        getElementText(el.closest?.('ds-input, form, .col-4, .form-field') || el)
+      ].join(' ');
+      return /\bcus\b/i.test(joined);
+    })[0] || null;
+  }
+  function setTextInputValue(input, value) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set ||
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (setter) setter.call(input, value);
+    else input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true }));
+  }
+  async function selectCusAndContinue(cusCode) {
+    showStatus(`Selecting CUS and entering ${cusCode}...`);
+    const option = await waitFor(findDirectCusRadioTarget, 35000, 500);
+    if (!option) {
+      showStatus('Could not find the CUS option; using no-code flow.', true);
+      return false;
+    }
+    await clickDirectRadioOption(option);
+    const input = await waitFor(findCusTextInput, 20000, 400);
+    if (!input) {
+      showStatus('Could not find the CUS entry field; using no-code flow.', true);
+      return false;
+    }
+    input.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    input.focus?.();
+    setTextInputValue(input, cusCode);
+    await sleep(500);
+    const continueButton = await waitFor(findEnabledContinueButton, 15000, 400);
+    if (!continueButton) {
+      showStatus('The CONTINUE button did not become enabled after entering CUS; using no-code flow.', true);
+      return false;
+    }
+    showStatus('Opening the XML upload step...');
+    clickAt(continueButton);
+    return true;
+  }
   async function selectNoCodeAndContinue() {
     showStatus('Selecting “I don’t have any code”...');
     const directOption = await waitFor(findDirectNoCodeRadioTarget, 35000, 500);
@@ -1135,7 +1264,8 @@
         return;
       }
       if (referencePage || /#\/?$/.test(location.hash || '')) {
-        const moved = await selectNoCodeAndContinue();
+        const cusCode = String(pending?.cusCode || '').trim();
+        const moved = cusCode ? (await selectCusAndContinue(cusCode) || await selectNoCodeAndContinue()) : await selectNoCodeAndContinue();
         if (moved) {
           await waitFor(() => hasUploadPageText() || hasFileInput(), 45000, 500);
           const continued = await selectDownloadedXmlOnUploadPage();
