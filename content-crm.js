@@ -267,7 +267,7 @@
   }
   function getEventInfoFromSubject() {
     const subject = getSubjectValue();
-    const match = String(subject || '').match(/\b(\d{8,12})-(\d+)\b/);
+    const match = String(subject || '').match(/(?:^|\D)(\d{8,12})-(\d+)(?=\D|$)/);
     if (!match) return { subject, eventNumber: '', pliNumber: '', rawEventNumber: '' };
     return {
       subject,
