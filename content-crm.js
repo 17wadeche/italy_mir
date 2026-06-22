@@ -233,16 +233,19 @@
   }
   function dispatchMouseSequence(el, point, detail = 1, preventClickDefault = false) {
     if (!el) return;
+    const originalHref = el.getAttribute?.('href');
     for (const eventName of ['mouseover', 'mousemove', 'mousedown', 'mouseup', 'click']) {
       const event = new MouseEvent(eventName, eventOptions(point, detail));
       let cancelJavascriptHref = null;
       if (preventClickDefault && eventName === 'click') {
         cancelJavascriptHref = (clickEvent) => clickEvent.preventDefault();
-        window.addEventListener('click', cancelJavascriptHref, { once: true });
+        window.addEventListener('click', cancelJavascriptHref, { capture: true, once: true });
+        if (hasJavascriptHref(el)) el.setAttribute('href', '#');
       }
       el.dispatchEvent(event);
       if (cancelJavascriptHref) {
-        window.removeEventListener('click', cancelJavascriptHref);
+        window.removeEventListener('click', cancelJavascriptHref, { capture: true });
+        if (originalHref !== null && el.getAttribute?.('href') !== originalHref) el.setAttribute('href', originalHref);
       }
     }
   }
@@ -356,10 +359,12 @@
     await sleep(1500);
     return container;
   }
-  function findEuropeanVigilanceLinks(pliNumber) {
-    const pli = String(pliNumber || '').trim();
+  function findRegulatoryReportLinksByItemNumber(itemNumber) {
+    const item = String(itemNumber || '').trim();
     const container = getRegulatoryReportsContainer();
-    if (!container) return [];
+    if (!container || !item) return [];
+    const escapedItem = item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const itemNumberPattern = new RegExp(`\\(${escapedItem}\\)\\s*:`, 'i');
     const candidates = container.querySelectorAll('.data').length
       ? container.querySelectorAll('.data')
       : container.querySelectorAll('a.GUIDE-sideNav');
@@ -367,10 +372,11 @@
       .map((el) => {
         const row = el.matches?.('.data') ? el : el.closest?.('.data');
         const link = el.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
-        const rowText = getElementText(row || el);
-        return { row, link, rowText };
+        const itemNumberEl = row?.querySelector?.('.item-number');
+        const itemText = getElementText(itemNumberEl) || getElementText(row || el);
+        return { row, link, itemText };
       })
-      .filter(({ link, rowText }) => link && /european vigilance/i.test(getElementText(link)) && new RegExp(`\\(${pli.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)\\s*:`, 'i').test(rowText));
+      .filter(({ link, itemText }) => link && itemNumberPattern.test(itemText));
   }
   function readRbAcknowledgement() {
     const cell = document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement');
@@ -380,15 +386,13 @@
     const match = cleaned.match(/\bCUS-\d{2,4}-\d+\b/i);
     return match ? match[0].toUpperCase() : '';
   }
-  async function findCusForEvent({ eventNumber, pliNumber }) {
-    await performQuickSearch(eventNumber);
-    await sleep(4000);
+  async function findCusForEvent({ pliNumber }) {
     await expandRegulatoryReports();
     const links = await waitFor(() => {
-      const found = findEuropeanVigilanceLinks(pliNumber);
+      const found = findRegulatoryReportLinksByItemNumber(pliNumber);
       return found.length ? found : null;
     }, 30000, 500);
-    if (!links?.length) return { ok: true, cusCode: '', reason: 'No matching European Vigilance PLI link found.' };
+    if (!links?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
     for (const item of links) {
       item.link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
       activateElement(item.link, centerOfElement(item.link));
@@ -396,7 +400,7 @@
       const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
       if (cusCode) return { ok: true, cusCode };
     }
-    return { ok: true, cusCode: '', reason: 'Matching European Vigilance reports did not have an RB Acknowledgement #.' };
+    return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
   }
   function uniqueElements(elements) {
     const seen = new Set();
