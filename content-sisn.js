@@ -17,6 +17,7 @@
   let moduleAdvanceRunning = false;
   let moduleNextClicksDone = 0;
   let moduleAttentionRecoveryAttempted = false;
+  let extensionContextInvalidated = false;
   console.info('[Italy MIR Helper] SISN content script loaded:', location.href);
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -963,40 +964,92 @@
     }
     return null;
   }
+  function getRuntimeLastErrorMessage() {
+    try {
+      return globalThis.chrome?.runtime?.lastError?.message || '';
+    } catch (error) {
+      return error?.message || String(error);
+    }
+  }
+  function isExtensionContextAvailable() {
+    try {
+      return Boolean(globalThis.chrome?.runtime?.id && globalThis.chrome?.storage?.local);
+    } catch (error) {
+      return false;
+    }
+  }
+  function extensionContextUnavailableResult() {
+    const error = 'Extension context invalidated. Please reload the SISN tab after updating or reloading the extension.';
+    if (!extensionContextInvalidated) {
+      extensionContextInvalidated = true;
+      showStatus(error, true);
+      console.warn('[Italy MIR Helper] SISN automation paused:', error);
+    }
+    return error;
+  }
   function getPending() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(PENDING_KEY, (result) => {
-        if (chrome.runtime.lastError) {
-          console.warn('[Italy MIR Helper] Storage read failed:', chrome.runtime.lastError.message);
-          resolve(null);
-          return;
-        }
-        const pending = result?.[PENDING_KEY];
-        if (!pending?.value) {
-          resolve(null);
-          return;
-        }
-        if (Date.now() - Number(pending.createdAt || 0) > MAX_PENDING_AGE_MS) {
-          clearPending();
-          resolve(null);
-          return;
-        }
-        resolve(pending);
-      });
+      if (!isExtensionContextAvailable()) {
+        extensionContextUnavailableResult();
+        resolve(null);
+        return;
+      }
+      try {
+        chrome.storage.local.get(PENDING_KEY, (result) => {
+          const lastErrorMessage = getRuntimeLastErrorMessage();
+          if (lastErrorMessage) {
+            console.warn('[Italy MIR Helper] Storage read failed:', lastErrorMessage);
+            resolve(null);
+            return;
+          }
+          const pending = result?.[PENDING_KEY];
+          if (!pending?.value) {
+            resolve(null);
+            return;
+          }
+          if (Date.now() - Number(pending.createdAt || 0) > MAX_PENDING_AGE_MS) {
+            clearPending();
+            resolve(null);
+            return;
+          }
+          resolve(pending);
+        });
+      } catch (error) {
+        console.warn('[Italy MIR Helper] Storage read failed:', error?.message || error);
+        if (/Extension context invalidated/i.test(error?.message || String(error))) extensionContextUnavailableResult();
+        resolve(null);
+      }
     });
   }
   function clearPending() {
-    chrome.runtime.sendMessage({ type: 'MIR_HELPER_CLEAR_PENDING' });
+    if (!isExtensionContextAvailable()) return;
+    try {
+      chrome.runtime.sendMessage({ type: 'MIR_HELPER_CLEAR_PENDING' });
+    } catch (error) {
+      console.warn('[Italy MIR Helper] Could not clear pending SISN automation:', error?.message || error);
+      if (/Extension context invalidated/i.test(error?.message || String(error))) extensionContextUnavailableResult();
+    }
   }
   function sendUploadMessage() {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'MIR_HELPER_UPLOAD_LATEST_XML' }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, error: chrome.runtime.lastError.message });
-          return;
-        }
-        resolve(response || { ok: false, error: 'No response from extension service worker.' });
-      });
+      if (!isExtensionContextAvailable()) {
+        resolve({ ok: false, error: extensionContextUnavailableResult() });
+        return;
+      }
+      try {
+        chrome.runtime.sendMessage({ type: 'MIR_HELPER_UPLOAD_LATEST_XML' }, (response) => {
+          const lastErrorMessage = getRuntimeLastErrorMessage();
+          if (lastErrorMessage) {
+            resolve({ ok: false, error: lastErrorMessage });
+            return;
+          }
+          resolve(response || { ok: false, error: 'No response from extension service worker.' });
+        });
+      } catch (error) {
+        const message = error?.message || String(error);
+        if (/Extension context invalidated/i.test(message)) extensionContextUnavailableResult();
+        resolve({ ok: false, error: message });
+      }
     });
   }
   function isCusValue(el) {
