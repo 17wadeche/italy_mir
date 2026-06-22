@@ -397,11 +397,23 @@ async function setDownloadedFileOnSisnTab(tabId, filePath) {
 }
 async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
   if (!sourceTabId || !eventInfo?.eventNumber || !eventInfo?.pliNumber) {
+    console.warn('[Italy MIR Helper] Skipping CRM tab duplicate for CUS lookup because required data is missing:', {
+      sourceTabId,
+      eventInfo
+    });
     return { ok: true, cusCode: '', skipped: true };
   }
   let duplicateTab = null;
   try {
+    console.info('[Italy MIR Helper] Duplicating CRM tab for CUS lookup:', {
+      sourceTabId,
+      eventInfo
+    });
     duplicateTab = await tabsDuplicate(sourceTabId);
+    console.info('[Italy MIR Helper] CRM duplicate tab created for CUS lookup:', {
+      duplicateTabId: duplicateTab?.id,
+      duplicateUrl: duplicateTab?.url
+    });
     await sleep(5000);
     const endTime = Date.now() + 120000;
     let lastError = '';

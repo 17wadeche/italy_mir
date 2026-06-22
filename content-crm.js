@@ -446,12 +446,13 @@
       setStatus('Could not find the XML attachment. Refresh the page and try again.', true);
       return;
     }
+    const eventInfo = getEventInfoFromSubject();
+    console.info('[Italy MIR Helper] CRM event info before XML click:', eventInfo);
     const startButton = document.getElementById('mir-helper-start');
     if (startButton) startButton.disabled = true;
     setStatus('Double-clicking the XML filename...');
     const downloadStartedAt = Date.now();
     await clickXmlAttachment(targetInfo);
-    const eventInfo = getEventInfoFromSubject();
     setStatus(eventInfo.eventNumber ? `Looking up RB Acknowledgement # for event ${eventInfo.eventNumber}-${eventInfo.pliNumber}...` : 'Opening SISN MIR portal...');
     chrome.runtime.sendMessage({
       type: 'MIR_HELPER_OPEN_SISN',
