@@ -7,6 +7,7 @@
   let userDismissed = false;
   let lastConditionState = false;
   let popupHideTimer = null;
+  let cusLookupState = { key: '', promise: null, searchedEventNumber: '' };
   console.info('[Italy MIR Helper] CRM content script loaded:', {
     url: location.href,
     frame: window.top === window ? 'top' : 'iframe'
@@ -386,16 +387,23 @@
     const match = cleaned.match(/\bCUS-\d{2,4}-\d+\b/i);
     return match ? match[0].toUpperCase() : '';
   }
-  async function findCusForEvent({ eventNumber, pliNumber }) {
-    await performQuickSearch(eventNumber);
-    await sleep(4000);
+  async function runCusLookup({ eventNumber, pliNumber }) {
+    if (cusLookupState.searchedEventNumber !== eventNumber) {
+      await performQuickSearch(eventNumber);
+      cusLookupState.searchedEventNumber = eventNumber;
+      await sleep(4000);
+    }
     await expandRegulatoryReports();
     const links = await waitFor(() => {
       const found = findRegulatoryReportLinksByItemNumber(pliNumber);
       return found.length ? found : null;
     }, 30000, 500);
     if (!links?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
-    for (const item of links) {
+    for (let index = 0; index < links.length; index += 1) {
+      await expandRegulatoryReports();
+      const currentLinks = findRegulatoryReportLinksByItemNumber(pliNumber);
+      const item = currentLinks[index];
+      if (!item?.link) break;
       item.link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
       activateElement(item.link, centerOfElement(item.link));
       await sleep(2500);
@@ -403,6 +411,19 @@
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
+  }
+  async function findCusForEvent({ eventNumber, pliNumber }) {
+    const key = `${eventNumber || ''}-${pliNumber || ''}`;
+    if (cusLookupState.promise && cusLookupState.key === key) {
+      console.info('[Italy MIR Helper] Reusing in-flight CRM CUS lookup:', key);
+      return cusLookupState.promise;
+    }
+    cusLookupState.key = key;
+    cusLookupState.promise = runCusLookup({ eventNumber, pliNumber })
+      .finally(() => {
+        if (cusLookupState.key === key) cusLookupState.promise = null;
+      });
+    return cusLookupState.promise;
   }
   function uniqueElements(elements) {
     const seen = new Set();
