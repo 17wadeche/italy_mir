@@ -231,11 +231,30 @@
       screenY: Math.round(window.screenY + point.y)
     };
   }
-  function dispatchMouseSequence(el, point, detail = 1) {
+  function dispatchMouseSequence(el, point, detail = 1, preventClickDefault = false) {
     if (!el) return;
     for (const eventName of ['mouseover', 'mousemove', 'mousedown', 'mouseup', 'click']) {
-      el.dispatchEvent(new MouseEvent(eventName, eventOptions(point, detail)));
+      const event = new MouseEvent(eventName, eventOptions(point, detail));
+      let cancelJavascriptHref = null;
+      if (preventClickDefault && eventName === 'click') {
+        cancelJavascriptHref = (clickEvent) => clickEvent.preventDefault();
+        window.addEventListener('click', cancelJavascriptHref, { once: true });
+      }
+      el.dispatchEvent(event);
+      if (cancelJavascriptHref) {
+        window.removeEventListener('click', cancelJavascriptHref);
+      }
     }
+  }
+  function hasJavascriptHref(el) {
+    return /^\s*javascript\s*:/i.test(el?.getAttribute?.('href') || '');
+  }
+  function activateElement(el, point, detail = 1) {
+    if (!el) return;
+    const preventClickDefault = hasJavascriptHref(el);
+    dispatchPointerSequence(el, point, detail);
+    dispatchMouseSequence(el, point, detail, preventClickDefault);
+    if (!preventClickDefault) el.click?.();
   }
   function dispatchPointerSequence(el, point, detail = 1) {
     if (!el || typeof PointerEvent === 'undefined') return;
@@ -304,9 +323,7 @@
     const go = findQuickSearchGo();
     if (go) {
       const point = centerOfElement(go);
-      dispatchPointerSequence(go, point);
-      dispatchMouseSequence(go, point);
-      go.click?.();
+      activateElement(go, point);
     } else {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
     }
@@ -335,14 +352,18 @@
     if (wrapper && getComputedStyle(wrapper).display !== 'none') return container;
     const clicker = container.querySelector('.clicker') || container;
     clicker.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
-    clicker.click?.();
-    dispatchMouseSequence(clicker, centerOfElement(clicker));
+    activateElement(clicker, centerOfElement(clicker));
     await sleep(1500);
     return container;
   }
   function findEuropeanVigilanceLinks(pliNumber) {
     const pli = String(pliNumber || '').trim();
-    return Array.from(document.querySelectorAll('.RegulatoryReports .data, .RegulatoryReports a.GUIDE-sideNav, a.GUIDE-sideNav'))
+    const container = getRegulatoryReportsContainer();
+    if (!container) return [];
+    const candidates = container.querySelectorAll('.data').length
+      ? container.querySelectorAll('.data')
+      : container.querySelectorAll('a.GUIDE-sideNav');
+    return Array.from(candidates)
       .map((el) => {
         const row = el.matches?.('.data') ? el : el.closest?.('.data');
         const link = el.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
@@ -370,8 +391,7 @@
     if (!links?.length) return { ok: true, cusCode: '', reason: 'No matching European Vigilance PLI link found.' };
     for (const item of links) {
       item.link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
-      item.link.click?.();
-      dispatchMouseSequence(item.link, centerOfElement(item.link));
+      activateElement(item.link, centerOfElement(item.link));
       await sleep(2500);
       const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
       if (cusCode) return { ok: true, cusCode };
