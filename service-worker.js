@@ -427,6 +427,7 @@ async function handleOpenSisn(message, sender) {
   const now = Date.now();
   const sourceTabId = sender?.tab?.id || null;
   const eventInfo = message?.eventInfo || {};
+  const downloadStartedAt = Number(message?.downloadStartedAt || now);
   const lookupResult = await lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo });
   if (!lookupResult?.ok) {
     console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
@@ -434,6 +435,7 @@ async function handleOpenSisn(message, sender) {
   const payload = {
     value: true,
     createdAt: now,
+    downloadStartedAt,
     sourceUrl: sender?.url || sender?.tab?.url || '',
     expectedXmlName: message?.xmlName || '',
     crmTabId: sourceTabId,
@@ -450,7 +452,7 @@ async function handleUploadLatestXml(sender) {
   if (!tabId) throw new Error('Could not identify the SISN browser tab.');
   const result = await storageGet(PENDING_KEY);
   const pending = result?.[PENDING_KEY] || {};
-  const sinceMs = Number(pending.createdAt || Date.now() - 60000);
+  const sinceMs = Number(pending.downloadStartedAt || pending.createdAt || Date.now() - 60000);
   const expectedXmlName = pending.expectedXmlName || '';
   const download = await findLatestCompletedXmlDownload({ sinceMs, expectedXmlName });
   if (!download?.filename) {

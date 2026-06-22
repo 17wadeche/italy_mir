@@ -260,13 +260,19 @@
     ].filter(Boolean);
     return candidates.map((el) => el.value || el.getAttribute('value') || '').find(Boolean) || '';
   }
+  function normalizeEventNumber(rawEventNumber) {
+    const digits = String(rawEventNumber || '').replace(/\D/g, '');
+    if (!digits) return '';
+    return digits.length < 10 ? digits.padStart(10, '0') : digits;
+  }
   function getEventInfoFromSubject() {
     const subject = getSubjectValue();
-    const match = String(subject || '').match(/\b0?(\d{8,12})-(\d+)\b/);
-    if (!match) return { subject, eventNumber: '', pliNumber: '' };
+    const match = String(subject || '').match(/\b(\d{8,12})-(\d+)\b/);
+    if (!match) return { subject, eventNumber: '', pliNumber: '', rawEventNumber: '' };
     return {
       subject,
-      eventNumber: match[1],
+      eventNumber: normalizeEventNumber(match[1]),
+      rawEventNumber: match[1],
       pliNumber: match[2]
     };
   }
@@ -443,13 +449,15 @@
     const startButton = document.getElementById('mir-helper-start');
     if (startButton) startButton.disabled = true;
     setStatus('Double-clicking the XML filename...');
+    const downloadStartedAt = Date.now();
     await clickXmlAttachment(targetInfo);
     const eventInfo = getEventInfoFromSubject();
     setStatus(eventInfo.eventNumber ? `Looking up RB Acknowledgement # for event ${eventInfo.eventNumber}-${eventInfo.pliNumber}...` : 'Opening SISN MIR portal...');
     chrome.runtime.sendMessage({
       type: 'MIR_HELPER_OPEN_SISN',
       xmlName: targetInfo.xmlName || '',
-      eventInfo
+      eventInfo,
+      downloadStartedAt
     }, (response) => {
       if (chrome.runtime.lastError) {
         setStatus(`Could not open SISN portal: ${chrome.runtime.lastError.message}`, true);
