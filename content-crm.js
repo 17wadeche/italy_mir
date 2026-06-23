@@ -339,11 +339,29 @@
   function nativeClickElement(el, point = null, detail = 1) {
     if (!el) return false;
     const p = point || centerOfElement(el);
+    const preventJavascriptNavigation = hasJavascriptHref(el);
     dispatchPointerSequence(el, p, detail);
     for (const eventName of ['mouseover', 'mousemove', 'mousedown', 'mouseup']) {
       el.dispatchEvent(new MouseEvent(eventName, eventOptions(p, detail)));
     }
-    el.click?.();
+    const cancelJavascriptHref = (clickEvent) => {
+      clickEvent.preventDefault();
+    };
+    if (preventJavascriptNavigation) {
+      window.addEventListener('click', cancelJavascriptHref, {
+        capture: true,
+        once: true
+      });
+    }
+    try {
+      el.click?.();
+    } finally {
+      if (preventJavascriptNavigation) {
+        window.removeEventListener('click', cancelJavascriptHref, {
+          capture: true
+        });
+      }
+    }
     return true;
   }
   async function performQuickSearch(eventNumber, timeoutMs = 8000) {
