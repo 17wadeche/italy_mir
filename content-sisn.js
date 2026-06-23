@@ -1160,6 +1160,45 @@
       if (/Extension context invalidated/i.test(error?.message || String(error))) extensionContextUnavailableResult();
     }
   }
+  function findXmlUploadProxyInput() {
+    return deepQuerySelectorAll((el) => {
+      if (!el.matches?.('input[readonly], input[type="text"], ds-input, ds-input-upload, ds-input-upload-core')) {
+        return false;
+      }
+      if (!isVisible(el)) return false;
+      const text = normalize([
+        el.value,
+        el.placeholder,
+        el.getAttribute?.('aria-label'),
+        el.getAttribute?.('aria-labelledby'),
+        getElementText(el),
+        getElementText(el.closest?.('ds-input-upload, ds-input-upload-core, ds-input, .form-field, div') || el)
+      ].join(' '));
+      return /upload your xml report file/i.test(text);
+    })[0] || null;
+  }
+  async function primeXmlUploadControl() {
+    const proxy = findXmlUploadProxyInput();
+    if (!proxy) return false;
+    const host =
+      proxy.closest?.('ds-input-upload, ds-input-upload-core, ds-input, .form-field, div') ||
+      proxy;
+    try {
+      host.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
+    } catch (_) {}
+    clickAt(host);
+    await sleep(100);
+    clickAt(proxy);
+    await sleep(250);
+    console.info('[Italy MIR Helper] Primed SISN XML upload control.', {
+      proxyTag: proxy.tagName,
+      proxyId: proxy.id,
+      proxyValue: proxy.value,
+      hostTag: host.tagName,
+      fileInputsAfterPrime: getFileInputsDeep().length
+    });
+    return true;
+  }
   function sendUploadMessage() {
     return new Promise((resolve) => {
       if (!isExtensionContextAvailable()) {
@@ -1400,6 +1439,8 @@
     lastUploadAttemptAt = Date.now();
     uploadAttemptRunning = true;
     try {
+      showStatus('Preparing the XML upload field...');
+      await primeXmlUploadControl();
       showStatus('Selecting the downloaded XML file...');
       console.info('[Italy MIR Helper] Requesting latest XML download upload. Deep file inputs:', getFileInputsDeep().length);
       const response = await sendUploadMessage();
@@ -1408,7 +1449,11 @@
         console.warn('[Italy MIR Helper] XML upload selection failed:', response);
         return false;
       }
-      await waitFor(() => hasSelectedXmlFile() || findEnabledContinueButton(), UPLOAD_SELECTION_SETTLE_MS, UPLOAD_SELECTION_POLL_MS);
+      await waitFor(
+        () => hasSelectedXmlFile() || findEnabledContinueButton(),
+        UPLOAD_SELECTION_SETTLE_MS,
+        UPLOAD_SELECTION_POLL_MS
+      );
       const selectedNames = getSelectedFileNames();
       const displayName = selectedNames[0] || response.filename;
       showStatus(`Selected XML file: ${displayName}. Clicking CONTINUE...`);
@@ -1417,9 +1462,11 @@
         selectedNames,
         deepFileInputs: getFileInputsDeep().length
       });
-      const continueButton = findEnabledContinueButton() || await waitFor(findEnabledContinueButton, 2500, UPLOAD_SELECTION_POLL_MS);
+      const continueButton =
+        findEnabledContinueButton() ||
+        await waitFor(findEnabledContinueButton, 2500, UPLOAD_SELECTION_POLL_MS);
       if (continueButton) {
-        showStatus(`XML file selected: ${displayName}. Clicking CONTINUE...`);
+        showStatus(`XML file selected: ${displayName}. Clicking CONTINUE.`);
         clickAt(continueButton);
         uploadContinueClicked = true;
         return true;
