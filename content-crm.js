@@ -7,6 +7,28 @@
   let userDismissed = false;
   let lastConditionState = false;
   let popupHideTimer = null;
+  let crmLockInstalled = false;
+  const CRM_LOCK_OVERLAY_ID = 'mir-helper-crm-lock-overlay';
+  const CRM_LOCK_EVENTS = [
+    'beforeinput',
+    'input',
+    'keydown',
+    'keypress',
+    'keyup',
+    'paste',
+    'cut',
+    'drop',
+    'dragover',
+    'pointerdown',
+    'pointerup',
+    'mousedown',
+    'mouseup',
+    'click',
+    'dblclick',
+    'contextmenu',
+    'touchstart',
+    'touchend'
+  ];
   let cusLookupState = { key: '', promise: null, searchedEventNumber: '' };
   let regulatoryReportsContainerCache = null;
   let regulatoryReportRowsCache = null;
@@ -14,6 +36,51 @@
     url: location.href,
     frame: window.top === window ? 'top' : 'iframe'
   });
+  function blockTrustedCrmLockEvent(event) {
+    if (!crmLockInstalled || !event?.isTrusted) return;
+    event.preventDefault?.();
+    event.stopImmediatePropagation?.();
+    event.stopPropagation?.();
+  }
+  function ensureCrmLockOverlay(message = 'Looking up CUS in CRM. Please wait...') {
+    if (window.top !== window || !document.documentElement) return;
+    let overlay = document.getElementById(CRM_LOCK_OVERLAY_ID);
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = CRM_LOCK_OVERLAY_ID;
+      overlay.setAttribute('role', 'status');
+      overlay.setAttribute('aria-live', 'polite');
+      overlay.innerHTML = '<div class="mir-helper-crm-lock-card"><div class="mir-helper-title">CRM is locked</div><div class="mir-helper-body"></div></div>';
+      document.documentElement.appendChild(overlay);
+    }
+    const body = overlay.querySelector('.mir-helper-body');
+    if (body) body.textContent = message;
+  }
+  function setCrmUserLock(locked, message) {
+    if (locked) {
+      if (!crmLockInstalled) {
+        CRM_LOCK_EVENTS.forEach((eventName) => {
+          window.addEventListener(eventName, blockTrustedCrmLockEvent, { capture: true });
+          document.addEventListener(eventName, blockTrustedCrmLockEvent, { capture: true });
+        });
+        crmLockInstalled = true;
+      }
+      ensureCrmLockOverlay(message);
+      console.info('[Italy MIR Helper] CRM user editing locked for automated CUS lookup:', {
+        frame: window.top === window ? 'top' : 'iframe',
+        url: location.href
+      });
+      return;
+    }
+    if (crmLockInstalled) {
+      CRM_LOCK_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, blockTrustedCrmLockEvent, { capture: true });
+        document.removeEventListener(eventName, blockTrustedCrmLockEvent, { capture: true });
+      });
+      crmLockInstalled = false;
+    }
+    if (window.top === window) document.getElementById(CRM_LOCK_OVERLAY_ID)?.remove();
+  }
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
@@ -929,6 +996,11 @@
     window.setInterval(scheduleCheck, 5000);
   }
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === 'MIR_HELPER_CRM_SET_USER_LOCK') {
+      setCrmUserLock(Boolean(message.locked), message.message);
+      sendResponse({ ok: true });
+      return false;
+    }
     if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
     const input = findQuickSearchInput();
     if (!input || !isVisibleElement(input)) return false;

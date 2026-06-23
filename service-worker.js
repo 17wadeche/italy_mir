@@ -448,6 +448,15 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
     duplicateTab = await tabsUpdate(duplicateTab.id, { active: true });
     await waitForTabComplete(duplicateTab.id, 30000);
     await sleep(1000);
+    try {
+      await tabsSendMessage(duplicateTab.id, {
+        type: 'MIR_HELPER_CRM_SET_USER_LOCK',
+        locked: true,
+        message: 'Looking up CUS in CRM. Please wait until the automation closes this tab.'
+      });
+    } catch (error) {
+      console.warn('[Italy MIR Helper] Could not lock CRM duplicate tab during CUS lookup:', error?.message || String(error));
+    }
     const endTime = Date.now() + 120000;
     let lastError = '';
     while (Date.now() < endTime) {
@@ -465,6 +474,11 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
     }
     return { ok: false, cusCode: '', error: lastError || 'Timed out waiting for CRM CUS lookup.' };
   } finally {
+    if (duplicateTab?.id) {
+      try {
+        await tabsSendMessage(duplicateTab.id, { type: 'MIR_HELPER_CRM_SET_USER_LOCK', locked: false });
+      } catch (_) {}
+    }
     await tabsRemove(duplicateTab?.id);
   }
 }

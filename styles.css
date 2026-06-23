@@ -101,3 +101,27 @@
   color: #17324d;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
 }
+#mir-helper-crm-lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.28);
+  cursor: wait;
+  pointer-events: auto;
+  font-family: Arial, Helvetica, sans-serif;
+}
+#mir-helper-crm-lock-overlay .mir-helper-crm-lock-card {
+  width: min(380px, 100%);
+  box-sizing: border-box;
+  padding: 16px;
+  border: 2px solid #0072ce;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #17324d;
+  text-align: center;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
+}
