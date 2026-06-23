@@ -38,6 +38,10 @@
       .filter(Boolean)
       .join(' ');
   }
+  function extractCusCode(text) {
+    const match = String(text || '').replace(/\u00a0/g, ' ').match(/\bCUS-\d{2,4}-\d+\b/i);
+    return match ? match[0].toUpperCase() : '';
+  }
   function getPageSearchText() {
     const parts = [];
     if (document.body) {
@@ -402,9 +406,20 @@
     const cell = document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement');
     const text = (cell ? getElementText(cell) : '') ||
       getElementText(document.querySelector('[id*="RBAcknowledgement"]'));
-    const cleaned = String(text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-    const match = cleaned.match(/\bCUS-\d{2,4}-\d+\b/i);
-    return match ? match[0].toUpperCase() : '';
+    const directMatch = extractCusCode(text);
+    if (directMatch) return directMatch;
+    const labels = Array.from(document.querySelectorAll('label'))
+      .filter((label) => /RB\s*Acknowledgement\s*#?\s*:/i.test(getElementText(label)));
+    for (const label of labels) {
+      const labelTargetId = label.getAttribute('for');
+      const target = labelTargetId ? document.getElementById(labelTargetId) : null;
+      const targetMatch = extractCusCode(getElementText(target));
+      if (targetMatch) return targetMatch;
+      const row = label.closest('tr, .ch-grid-row, .th-grid-row, [role="row"]');
+      const rowMatch = extractCusCode(getElementText(row));
+      if (rowMatch) return rowMatch;
+    }
+    return extractCusCode(getElementText(document.body));
   }
   async function runCusLookup({ eventNumber, pliNumber }) {
     if (cusLookupState.searchedEventNumber !== eventNumber) {
