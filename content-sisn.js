@@ -1262,8 +1262,9 @@
     await sleep(500);
     const continueButton = await waitFor(findEnabledContinueButton, 15000, 400);
     if (!continueButton) {
-      showStatus('The CONTINUE button did not become enabled after entering CUS; using no-code flow.', true);
-      return false;
+      showStatus('CUS needs to be fixed', true);
+      clearPending();
+      return 'stop';
     }
     showStatus('Opening the XML upload step...');
     clickAt(continueButton);
@@ -1275,7 +1276,7 @@
         showStatus('CUS not found. Restarting with “I don’t have any code”...');
         return false;
       }
-      showStatus('CUS not found. Automation stopped so you can edit the CUS.', true);
+      showStatus('CUS not found. Automation stopped so you can edit the CUS.', true, 10000);
       clearPending();
       return 'stop';
     }
