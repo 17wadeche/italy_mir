@@ -364,6 +364,12 @@
     if (window.CSS?.escape) return CSS.escape(value);
     return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
+  function isEuropeanVigilanceReportLink(link) {
+    if (!link) return false;
+    const title = String(link.getAttribute?.('title') || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    const text = String(getElementText(link) || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    return title === 'European Vigilance' || text === 'European Vigilance';
+  }
   function getRegulatoryReportRowsByItemNumber(itemNumber) {
     const item = String(itemNumber || '').trim();
     const container = getRegulatoryReportsContainer();
@@ -382,7 +388,7 @@
         const transId = link?.getAttribute?.('data-trans-id') || '';
         return { row, link, itemText, transId, index };
       })
-      .filter(({ link, itemText }) => link && itemNumberPattern.test(itemText));
+      .filter(({ link, itemText }) => link && isEuropeanVigilanceReportLink(link) && itemNumberPattern.test(itemText));
   }
   function getRegulatoryReportLink(report) {
     const container = getRegulatoryReportsContainer();
