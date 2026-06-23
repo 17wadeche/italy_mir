@@ -314,9 +314,11 @@
       Array.from(document.querySelectorAll('input')).find((el) => /search[_-]?value|quicksearch/i.test(`${el.id} ${el.name} ${el.getAttribute('tempname') || ''}`));
   }
   function findQuickSearchGo() {
-    return document.getElementById('C17_W52_V53_QUICKSEARCH') ||
-      Array.from(document.querySelectorAll('a, button, [role="button"], input[type="button"], input[type="submit"]'))
-        .find((el) => isVisibleElement(el) && /^go$/i.test(normalize(getElementText(el))));
+    const direct = document.getElementById('C17_W52_V53_QUICKSEARCH') ||
+      document.querySelector('a[id$="_QUICKSEARCH"], button[id$="_QUICKSEARCH"], input[id$="_QUICKSEARCH"]');
+    if (direct && isVisibleElement(direct)) return direct;
+    return Array.from(document.querySelectorAll('a, button, [role="button"], input[type="button"], input[type="submit"]'))
+      .find((el) => isVisibleElement(el) && /^go$/i.test(normalize(getFastElementText(el))));
   }
   function setInputValue(input, value) {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -325,19 +327,46 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
+  function isElementInViewport(el) {
+    if (!el || !isVisibleElement(el)) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.top >= 0 && rect.left >= 0 && rect.bottom <= window.innerHeight && rect.right <= window.innerWidth;
+  }
+  function ensureElementInView(el) {
+    if (!el || isElementInViewport(el)) return;
+    el.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
+  }
+  function nativeClickElement(el, point = null, detail = 1) {
+    if (!el) return false;
+    const p = point || centerOfElement(el);
+    dispatchPointerSequence(el, p, detail);
+    for (const eventName of ['mouseover', 'mousemove', 'mousedown', 'mouseup']) {
+      el.dispatchEvent(new MouseEvent(eventName, eventOptions(p, detail)));
+    }
+    el.click?.();
+    return true;
+  }
   async function performQuickSearch(eventNumber, timeoutMs = 8000) {
     const input = await waitFor(findQuickSearchInput, timeoutMs, 50);
     if (!input) throw new Error('Could not find the CRM quick-search input.');
-    input.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
+    ensureElementInView(input);
     input.focus?.();
     setInputValue(input, eventNumber);
+    await sleep(0);
     const go = findQuickSearchGo();
     if (go) {
-      const point = centerOfElement(go);
-      activateElement(go, point);
+      ensureElementInView(go);
+      nativeClickElement(go, centerOfElement(go));
     } else {
       for (const eventName of ['keydown', 'keypress', 'keyup']) {
-        input.dispatchEvent(new KeyboardEvent(eventName, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+        input.dispatchEvent(new KeyboardEvent(eventName, {
+          key: 'Enter',
+          code: 'Enter',
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+          cancelable: true
+        }));
       }
     }
   }
@@ -485,24 +514,83 @@
     }
     return getRegulatoryReportRowsByItemNumber(report.itemNumber)[report.matchIndex]?.link || null;
   }
-  function readRbAcknowledgement() {
-    const cell = document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement');
-    const text = (cell ? getElementText(cell) : '') ||
-      getElementText(document.querySelector('[id*="RBAcknowledgement"]'));
-    const directMatch = extractCusCode(text);
-    if (directMatch) return directMatch;
+  function getRbAcknowledgementElement() {
+    return document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement') ||
+      document.querySelector('[id*="RBAcknowledgement"]');
+  }
+  function getRegReportDetailsRoot() {
+    const ack = getRbAcknowledgementElement();
+    if (ack) {
+      return ack.closest?.('[id*="RegReportDetails"], .RegReportDetails, .details, .section, .panel, table, div') || ack.parentElement;
+    }
+    const byId = document.querySelector('[id*="RegReportDetails"]');
+    return byId?.closest?.('.RegReportDetails, .details, .section, .panel, div') || byId || null;
+  }
+  function getRbAcknowledgementText() {
+    const cell = getRbAcknowledgementElement();
+    if (cell) return getElementText(cell);
     const labels = Array.from(document.querySelectorAll('label'))
       .filter((label) => /RB\s*Acknowledgement\s*#?\s*:/i.test(getElementText(label)));
     for (const label of labels) {
       const labelTargetId = label.getAttribute('for');
       const target = labelTargetId ? document.getElementById(labelTargetId) : null;
-      const targetMatch = extractCusCode(getElementText(target));
-      if (targetMatch) return targetMatch;
+      const targetText = getElementText(target);
+      if (targetText) return targetText;
       const row = label.closest('tr, .ch-grid-row, .th-grid-row, [role="row"]');
-      const rowMatch = extractCusCode(getElementText(row));
-      if (rowMatch) return rowMatch;
+      const rowText = getElementText(row);
+      if (rowText) return rowText;
     }
-    return extractCusCode(getElementText(document.body));
+    return null;
+  }
+  function readRbAcknowledgement() {
+    const text = getRbAcknowledgementText();
+    const directMatch = extractCusCode(text);
+    if (directMatch) return directMatch;
+    const root = getRegReportDetailsRoot();
+    return root ? extractCusCode(getElementText(root)) : '';
+  }
+  function getRegReportDetailFingerprint() {
+    const root = getRegReportDetailsRoot();
+    const ack = getRbAcknowledgementText();
+    const text = getFastElementText(root || getRbAcknowledgementElement() || document.body);
+    return JSON.stringify({
+      href: location.href,
+      ack: normalize(ack || ''),
+      cus: extractCusCode(text),
+      len: text.length,
+      head: normalize(text).slice(0, 800)
+    });
+  }
+  function hasCrmLoadingState() {
+    return Boolean(Array.from(document.querySelectorAll('[aria-busy="true"], .loading, .spinner, .progress, .progressBar, .wait, .busy'))
+      .some(isVisibleElement));
+  }
+  async function waitForRegReportDetailAfterClick(beforeFingerprint, timeoutMs = 5000) {
+    const start = Date.now();
+    let lastFingerprint = '';
+    let stableSince = 0;
+    while (Date.now() - start < timeoutMs) {
+      const cus = readRbAcknowledgement();
+      if (cus) return true;
+      if (hasCrmLoadingState()) {
+        lastFingerprint = '';
+        stableSince = 0;
+        await sleep(50);
+        continue;
+      }
+      const fingerprint = getRegReportDetailFingerprint();
+      const ackTextKnown = getRbAcknowledgementText() !== null;
+      if (ackTextKnown && fingerprint !== beforeFingerprint) {
+        if (fingerprint !== lastFingerprint) {
+          lastFingerprint = fingerprint;
+          stableSince = Date.now();
+        } else if (Date.now() - stableSince >= 125) {
+          return true;
+        }
+      }
+      await sleep(50);
+    }
+    return Boolean(readRbAcknowledgement());
   }
   async function runCusLookup({ eventNumber, pliNumber }) {
     if (cusLookupState.searchedEventNumber !== eventNumber) {
@@ -510,9 +598,9 @@
       regulatoryReportRowsCache = null;
       await performQuickSearch(eventNumber);
       cusLookupState.searchedEventNumber = eventNumber;
-      await waitFor(getRegulatoryReportsContainer, 15000, 100);
+      await waitFor(getRegulatoryReportsContainer, 12000, 75);
     }
-    await expandRegulatoryReports();
+    const container = await expandRegulatoryReports();
     const reports = await waitFor(() => {
       const found = getRegulatoryReportRowsByItemNumber(pliNumber);
       return found.length ? found.map((report, matchIndex) => ({
@@ -521,7 +609,7 @@
         transId: report.transId,
         title: report.link?.getAttribute?.('title') || getFastElementText(report.link)
       })) : null;
-    }, 30000, 75);
+    }, 15000, 50);
     if (!reports?.length) {
       return {
         ok: true,
@@ -530,20 +618,16 @@
       };
     }
     for (const report of reports) {
-      let container = getRegulatoryReportsContainer();
-      let link =
+      const currentContainer = getRegulatoryReportsContainer() || container;
+      const link =
         getRegulatoryReportLink(report) ||
-        findRegulatoryReportRowsByItemNumberFast(report.itemNumber, container)[report.matchIndex]?.link;
-      if (!link) {
-        container = await expandRegulatoryReports();
-        link =
-          getRegulatoryReportLink(report) ||
-          findRegulatoryReportRowsByItemNumberFast(report.itemNumber, container)[report.matchIndex]?.link;
-      }
+        findRegulatoryReportRowsByItemNumberFast(report.itemNumber, currentContainer)[report.matchIndex]?.link;
       if (!link) continue;
-      link.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
-      activateElement(link, centerOfElement(link));
-      const cusCode = await waitFor(readRbAcknowledgement, 12000, 150);
+      ensureElementInView(link);
+      const beforeFingerprint = getRegReportDetailFingerprint();
+      nativeClickElement(link, centerOfElement(link));
+      await waitForRegReportDetailAfterClick(beforeFingerprint, 5000);
+      const cusCode = readRbAcknowledgement();
       if (cusCode) return { ok: true, cusCode };
     }
     return {
