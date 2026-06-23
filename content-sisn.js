@@ -5,11 +5,11 @@
   const STATUS_ID = 'mir-helper-sisn-status';
   const CHECK_INTERVAL_MS = 1000;
   const MODULE_NEXT_CLICKS_REQUIRED = 4;
-  const MODULE_NEXT_CLICK_DELAY_MS = 500;
-  const MODULE_PAGE_SETTLE_MS = 700;
+  const MODULE_NEXT_CLICK_DELAY_MS = 250;
+  const MODULE_PAGE_SETTLE_MS = 350;
   const MODULE_PAGE_SETTLE_TIMEOUT_MS = 45000;
-  const MODULE_POLL_MS = 200;
-  const SCROLL_SETTLE_MS = 250;
+  const MODULE_POLL_MS = 150;
+  const SCROLL_SETTLE_MS = 150;
   let automationRunning = false;
   let uploadAttemptRunning = false;
   let lastPageSignature = '';
@@ -1394,7 +1394,7 @@
     if (hasSelectedXmlFile()) {
       return await clickUploadContinueAfterXmlSelected();
     }
-    if (Date.now() - lastUploadAttemptAt < 3000) return false;
+    if (Date.now() - lastUploadAttemptAt < 1000) return false;
     lastUploadAttemptAt = Date.now();
     uploadAttemptRunning = true;
     try {
@@ -1406,7 +1406,7 @@
         console.warn('[Italy MIR Helper] XML upload selection failed:', response);
         return false;
       }
-      await waitFor(hasSelectedXmlFile, 10000, 300);
+      await waitFor(hasSelectedXmlFile, 3000, 150);
       const selectedNames = getSelectedFileNames();
       showStatus(`Selected XML file: ${selectedNames[0] || response.filename}. Clicking CONTINUE...`);
       console.info('[Italy MIR Helper] XML file selected on SISN upload page:', {
@@ -1414,7 +1414,16 @@
         selectedNames,
         deepFileInputs: getFileInputsDeep().length
       });
-      return await clickUploadContinueAfterXmlSelected();
+      const clicked = await clickUploadContinueAfterXmlSelected();
+      if (clicked) return true;
+      const continueButton = await waitFor(findEnabledContinueButton, 5000, 150);
+      if (continueButton) {
+        showStatus(`XML file selected: ${selectedNames[0] || response.filename}. Clicking CONTINUE...`);
+        clickAt(continueButton);
+        uploadContinueClicked = true;
+        return true;
+      }
+      return false;
     } finally {
       uploadAttemptRunning = false;
     }
@@ -1457,6 +1466,10 @@
         return;
       }
       if (referencePage || /#\/?$/.test(location.hash || '')) {
+        if (pending?.cusLookup?.pending) {
+          showStatus('Waiting for CRM CUS lookup while SISN loads...');
+          return;
+        }
         const cusCode = String(pending?.cusCode || '').trim();
         const cusMoveResult = cusCode ? await selectCusAndContinue(cusCode) : false;
         if (cusMoveResult === 'stop') return;
@@ -1488,12 +1501,12 @@
         runAutomationTick();
       };
       if ('requestIdleCallback' in window) {
-        requestIdleCallback(run, { timeout: 1500 });
+        window.setTimeout(run, 0);
       } else {
         window.setTimeout(run, 500);
       }
     }
-    window.setInterval(scheduleTick, 5000);
+    window.setInterval(scheduleTick, 1500);
     const observer = new MutationObserver(scheduleTick);
     observer.observe(document.documentElement, {
       childList: true,

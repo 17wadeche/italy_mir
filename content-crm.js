@@ -8,6 +8,8 @@
   let lastConditionState = false;
   let popupHideTimer = null;
   let cusLookupState = { key: '', promise: null, searchedEventNumber: '' };
+  let regulatoryReportsContainerCache = null;
+  let regulatoryReportRowsCache = null;
   console.info('[Italy MIR Helper] CRM content script loaded:', {
     url: location.href,
     frame: window.top === window ? 'top' : 'iframe'
@@ -352,9 +354,41 @@
     }
     return null;
   }
+  function getFastElementText(el) {
+    if (!el) return '';
+    return [
+      el.textContent,
+      el.value,
+      el.title,
+      el.alt,
+      el.name,
+      el.id,
+      el.getAttribute?.('aria-label'),
+      el.getAttribute?.('href')
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
   function getRegulatoryReportsContainer() {
-    return document.querySelector('.RegulatoryReports') ||
-      Array.from(document.querySelectorAll('div')).find((el) => isVisibleElement(el) && /regulatory report/i.test(getElementText(el)));
+    if (regulatoryReportsContainerCache?.isConnected) return regulatoryReportsContainerCache;
+    regulatoryReportsContainerCache = document.querySelector('.RegulatoryReports');
+    if (regulatoryReportsContainerCache) return regulatoryReportsContainerCache;
+    const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, legend, .section-header, .title, .header');
+    for (const heading of headings) {
+      if (!/regulatory report/i.test(getFastElementText(heading))) continue;
+      const container = heading.closest('.RegulatoryReports, .section, .panel, .ch-section, .th-section, div') || heading.parentElement;
+      if (isVisibleElement(container)) {
+        regulatoryReportsContainerCache = container;
+        return regulatoryReportsContainerCache;
+      }
+    }
+    for (const div of document.querySelectorAll('div')) {
+      if (isVisibleElement(div) && /regulatory report/i.test(getFastElementText(div))) {
+        regulatoryReportsContainerCache = div;
+        return regulatoryReportsContainerCache;
+      }
+    }
+    return null;
   }
   async function expandRegulatoryReports() {
     const container = await waitFor(getRegulatoryReportsContainer, 45000, 500);
@@ -362,8 +396,9 @@
     const wrapper = container.querySelector('.data-wrapper');
     if (wrapper && getComputedStyle(wrapper).display !== 'none') return container;
     const clicker = container.querySelector('.clicker') || container;
-    clicker.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    clicker.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
     activateElement(clicker, centerOfElement(clicker));
+    regulatoryReportRowsCache = null;
     await waitFor(() => !wrapper || getComputedStyle(wrapper).display !== 'none', 5000, 250);
     return container;
   }
@@ -377,25 +412,28 @@
     const text = String(getElementText(link) || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
     return title === 'European Vigilance' || text === 'European Vigilance';
   }
+  function getRegulatoryReportRows(container = getRegulatoryReportsContainer()) {
+    if (!container) return [];
+    if (regulatoryReportRowsCache?.container === container) return regulatoryReportRowsCache.rows;
+    const dataRows = Array.from(container.querySelectorAll('.data'));
+    const candidates = dataRows.length ? dataRows : Array.from(container.querySelectorAll('a.GUIDE-sideNav'));
+    const rows = candidates.map((el, index) => {
+      const row = el.matches?.('.data') ? el : el.closest?.('.data');
+      const link = el.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
+      const itemNumberEl = row?.querySelector?.('.item-number');
+      const itemText = getFastElementText(itemNumberEl) || getFastElementText(row || el);
+      const transId = link?.getAttribute?.('data-trans-id') || '';
+      return { row, link, itemText, transId, index };
+    }).filter(({ link }) => link && isEuropeanVigilanceReportLink(link));
+    if (rows.length) regulatoryReportRowsCache = { container, rows };
+    return rows;
+  }
   function getRegulatoryReportRowsByItemNumber(itemNumber) {
     const item = String(itemNumber || '').trim();
-    const container = getRegulatoryReportsContainer();
-    if (!container || !item) return [];
+    if (!item) return [];
     const escapedItem = item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const itemNumberPattern = new RegExp(`\\(${escapedItem}\\)\\s*:`, 'i');
-    const candidates = container.querySelectorAll('.data').length
-      ? container.querySelectorAll('.data')
-      : container.querySelectorAll('a.GUIDE-sideNav');
-    return Array.from(candidates)
-      .map((el, index) => {
-        const row = el.matches?.('.data') ? el : el.closest?.('.data');
-        const link = el.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
-        const itemNumberEl = row?.querySelector?.('.item-number');
-        const itemText = getElementText(itemNumberEl) || getElementText(row || el);
-        const transId = link?.getAttribute?.('data-trans-id') || '';
-        return { row, link, itemText, transId, index };
-      })
-      .filter(({ link, itemText }) => link && isEuropeanVigilanceReportLink(link) && itemNumberPattern.test(itemText));
+    return getRegulatoryReportRows().filter(({ itemText }) => itemNumberPattern.test(itemText));
   }
   function getRegulatoryReportLink(report) {
     const container = getRegulatoryReportsContainer();
@@ -426,9 +464,11 @@
   }
   async function runCusLookup({ eventNumber, pliNumber }) {
     if (cusLookupState.searchedEventNumber !== eventNumber) {
+      regulatoryReportsContainerCache = null;
+      regulatoryReportRowsCache = null;
       await performQuickSearch(eventNumber);
       cusLookupState.searchedEventNumber = eventNumber;
-      await waitFor(() => getRegulatoryReportsContainer() || /regulatory report/i.test(getElementText(document.body)), 15000, 150);
+      await waitFor(getRegulatoryReportsContainer, 15000, 150);
     }
     await expandRegulatoryReports();
     const reports = await waitFor(() => {
@@ -445,7 +485,7 @@
       await expandRegulatoryReports();
       const link = getRegulatoryReportLink(report);
       if (!link) continue;
-      link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+      link.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
       const cusCode = await waitFor(readRbAcknowledgement, 12000, 300);
       if (cusCode) return { ok: true, cusCode };

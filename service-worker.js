@@ -2,7 +2,7 @@
 const SISN_URL = 'https://sisn.salute.gov.it/app/dmirfe/#/';
 const PENDING_KEY = 'mirHelperPendingSisnStart';
 const MAX_DOWNLOAD_WAIT_MS = 30000;
-const DOWNLOAD_POLL_MS = 250;
+const DOWNLOAD_POLL_MS = 150;
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[Italy MIR Helper] Installed/updated.');
 });
@@ -215,11 +215,52 @@ function scoreFileInputAttributes(attrs) {
   return score;
 }
 async function findFileInputNodeInfo(target) {
-  await debuggerSendCommand(target, 'DOM.enable');
   await debuggerSendCommand(target, 'Runtime.enable');
+  const expression = `(() => {
+    const seen = new Set();
+    const inputs = [];
+    function visit(node) {
+      if (!node || seen.has(node)) return;
+      seen.add(node);
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.matches && node.matches('input[type="file"]')) inputs.push(node);
+        if (node.shadowRoot) visit(node.shadowRoot);
+      }
+      const children = node.children || node.childNodes || [];
+      for (const child of Array.from(children)) visit(child);
+    }
+    visit(document);
+    inputs.sort((a, b) => {
+      const score = (input) => {
+        const joined = [input.accept, input.name, input.id, input.className, input.getAttribute('aria-label'), input.getAttribute('label')].join(' ').toLowerCase();
+        let value = 0;
+        if (/xml/.test(input.accept || '')) value -= 100;
+        if (/xml/.test(joined)) value -= 50;
+        if (/upload/.test(joined)) value -= 25;
+        if (input.disabled) value += 1000;
+        return value;
+      };
+      return score(a) - score(b);
+    });
+    return inputs[0] || null;
+  })()`;
+  try {
+    const evalResult = await debuggerSendCommand(target, 'Runtime.evaluate', {
+      expression,
+      objectGroup: 'mir-helper',
+      includeCommandLineAPI: false
+    });
+    const objectId = evalResult?.result?.objectId;
+    if (objectId) {
+      return { objectId, selector: 'runtime deep input[type=file]', method: 'Runtime.evaluate deep traversal' };
+    }
+  } catch (error) {
+    console.warn('[Italy MIR Helper] Runtime file input search failed:', error?.message || String(error));
+  }
+  await debuggerSendCommand(target, 'DOM.enable');
   try {
     const { root } = await debuggerSendCommand(target, 'DOM.getDocument', {
-      depth: -1,
+      depth: 2,
       pierce: true
     });
     for (const selector of ['input[type="file"][accept*="xml" i]', 'input[type="file"]']) {
@@ -261,46 +302,6 @@ async function findFileInputNodeInfo(target) {
     }
   } catch (error) {
     console.warn('[Italy MIR Helper] Flattened shadow-DOM file input search failed:', error?.message || String(error));
-  }
-  const expression = `(() => {
-    const seen = new Set();
-    const inputs = [];
-    function visit(node) {
-      if (!node || seen.has(node)) return;
-      seen.add(node);
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        if (node.matches && node.matches('input[type="file"]')) inputs.push(node);
-        if (node.shadowRoot) visit(node.shadowRoot);
-      }
-      const children = node.children || node.childNodes || [];
-      for (const child of Array.from(children)) visit(child);
-    }
-    visit(document);
-    inputs.sort((a, b) => {
-      const score = (input) => {
-        const joined = [input.accept, input.name, input.id, input.className, input.getAttribute('aria-label'), input.getAttribute('label')].join(' ').toLowerCase();
-        let value = 0;
-        if (/xml/.test(input.accept || '')) value -= 100;
-        if (/xml/.test(joined)) value -= 50;
-        if (/upload/.test(joined)) value -= 25;
-        if (input.disabled) value += 1000;
-        return value;
-      };
-      return score(a) - score(b);
-    });
-    return inputs[0] || null;
-  })()`;
-  const evalResult = await debuggerSendCommand(target, 'Runtime.evaluate', {
-    expression,
-    objectGroup: 'mir-helper',
-    includeCommandLineAPI: false
-  });
-  const objectId = evalResult?.result?.objectId;
-  if (objectId) {
-    const requestNode = await debuggerSendCommand(target, 'DOM.requestNode', { objectId });
-    if (requestNode?.nodeId) {
-      return { nodeId: requestNode.nodeId, selector: 'runtime deep input[type=file]', method: 'Runtime.evaluate deep traversal' };
-    }
   }
   return null;
 }
@@ -439,11 +440,7 @@ async function handleOpenSisn(message, sender) {
   const sourceTabId = sender?.tab?.id || null;
   const eventInfo = message?.eventInfo || {};
   const downloadStartedAt = Number(message?.downloadStartedAt || now);
-  const lookupResult = await lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo });
-  if (!lookupResult?.ok) {
-    console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
-  }
-  const payload = {
+  const basePayload = {
     value: true,
     createdAt: now,
     downloadStartedAt,
@@ -451,11 +448,24 @@ async function handleOpenSisn(message, sender) {
     expectedXmlName: message?.xmlName || '',
     crmTabId: sourceTabId,
     eventInfo,
-    cusCode: lookupResult?.cusCode || '',
-    cusLookup: lookupResult || null
+    cusCode: '',
+    cusLookup: { ok: true, pending: true }
   };
-  await storageSet({ [PENDING_KEY]: payload });
-  const tab = await tabsCreate({ url: SISN_URL, active: true });
+  await storageSet({ [PENDING_KEY]: basePayload });
+  const [tab, lookupResult] = await Promise.all([
+    tabsCreate({ url: SISN_URL, active: true }),
+    lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo })
+  ]);
+  if (!lookupResult?.ok) {
+    console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
+  }
+  await storageSet({
+    [PENDING_KEY]: {
+      ...basePayload,
+      cusCode: lookupResult?.cusCode || '',
+      cusLookup: lookupResult || null
+    }
+  });
   return { ok: true, tabId: tab?.id || null };
 }
 async function handleUploadLatestXml(sender) {
