@@ -7,35 +7,10 @@
   let userDismissed = false;
   let lastConditionState = false;
   let popupHideTimer = null;
-  let cusLookupState = { key: '', promise: null, searchedEventNumber: '' };
-  function sendBackgroundLog(level, message, details = {}) {
-    try {
-      chrome.runtime.sendMessage({
-        type: 'MIR_HELPER_BACKGROUND_LOG',
-        level,
-        message,
-        details: {
-          ...details,
-          frame: window.top === window ? 'top' : 'iframe',
-          url: location.href
-        }
-      });
-    } catch (_) {}
-  }
-  sendBackgroundLog('info', 'CRM content script loaded');
-  function crmLookupLog(message, details = {}) {
-    try {
-      chrome.runtime.sendMessage({
-        type: 'MIR_HELPER_CRM_LOOKUP_LOG',
-        message,
-        details: {
-          ...details,
-          frame: window.top === window ? 'top' : 'iframe',
-          url: location.href
-        }
-      });
-    } catch (_) {}
-  }
+  console.info('[Italy MIR Helper] CRM content script loaded:', {
+    url: location.href,
+    frame: window.top === window ? 'top' : 'iframe'
+  });
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
@@ -384,11 +359,7 @@
     await sleep(1500);
     return container;
   }
-  function escapeCssValue(value) {
-    if (window.CSS?.escape) return CSS.escape(value);
-    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  }
-  function getRegulatoryReportRowsByItemNumber(itemNumber) {
+  function findRegulatoryReportLinksByItemNumber(itemNumber) {
     const item = String(itemNumber || '').trim();
     const container = getRegulatoryReportsContainer();
     if (!container || !item) return [];
@@ -398,51 +369,14 @@
       ? container.querySelectorAll('.data')
       : container.querySelectorAll('a.GUIDE-sideNav');
     return Array.from(candidates)
-      .map((el, index) => {
+      .map((el) => {
         const row = el.matches?.('.data') ? el : el.closest?.('.data');
         const link = el.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
         const itemNumberEl = row?.querySelector?.('.item-number');
         const itemText = getElementText(itemNumberEl) || getElementText(row || el);
-        const transId = link?.getAttribute?.('data-trans-id') || '';
-        return { row, link, itemText, transId, index };
+        return { row, link, itemText };
       })
       .filter(({ link, itemText }) => link && itemNumberPattern.test(itemText));
-  }
-  function summarizeRegulatoryReport(report, index) {
-    return {
-      index,
-      matchIndex: report?.matchIndex,
-      rowIndex: report?.index,
-      itemNumber: report?.itemNumber,
-      itemText: report?.itemText,
-      transId: report?.transId,
-      title: report?.title
-    };
-  }
-  function getRegulatoryReportLink(report) {
-    const container = getRegulatoryReportsContainer();
-    if (!container || !report) {
-      crmLookupLog('Regulatory Report link lookup skipped', {
-        hasContainer: Boolean(container),
-        hasReport: Boolean(report),
-        report: summarizeRegulatoryReport(report)
-      });
-      return null;
-    }
-    if (report.transId) {
-      const link = container.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
-      crmLookupLog('Regulatory Report link lookup by trans id', {
-        report: summarizeRegulatoryReport(report),
-        found: Boolean(link)
-      });
-      return link;
-    }
-    const link = getRegulatoryReportRowsByItemNumber(report.itemNumber)[report.matchIndex]?.link || null;
-    crmLookupLog('Regulatory Report link lookup by duplicate index', {
-      report: summarizeRegulatoryReport(report),
-      found: Boolean(link)
-    });
-    return link;
   }
   function readRbAcknowledgement() {
     const cell = document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement');
@@ -452,120 +386,23 @@
     const match = cleaned.match(/\bCUS-\d{2,4}-\d+\b/i);
     return match ? match[0].toUpperCase() : '';
   }
-  async function readCusAfterTransIdSearch(report, index, total) {
-    if (!report?.transId) return '';
-    crmLookupLog('Searching Regulatory Report by transaction id', {
-      attempt: index + 1,
-      total,
-      report: summarizeRegulatoryReport(report, index)
-    });
-    await performQuickSearch(report.transId);
+  async function findCusForEvent({ eventNumber, pliNumber }) {
+    await performQuickSearch(eventNumber);
     await sleep(4000);
-    const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
-    crmLookupLog('RB Acknowledgement result after transaction id search', {
-      attempt: index + 1,
-      total,
-      transId: report.transId,
-      title: report.title,
-      cusCode: cusCode || ''
-    });
-    return cusCode || '';
-  }
-  async function runCusLookup({ eventNumber, pliNumber }) {
-    if (cusLookupState.searchedEventNumber !== eventNumber) {
-      await performQuickSearch(eventNumber);
-      cusLookupState.searchedEventNumber = eventNumber;
-      await sleep(4000);
-    }
     await expandRegulatoryReports();
-    crmLookupLog('Starting Regulatory Report CUS lookup', { eventNumber, pliNumber });
-    const reports = await waitFor(() => {
-      const found = getRegulatoryReportRowsByItemNumber(pliNumber);
-      if (!found.length) return null;
-      crmLookupLog('Regulatory Report rows matching item number', {
-        pliNumber,
-        count: found.length,
-        reports: found.map((report, matchIndex) => summarizeRegulatoryReport({
-          itemNumber: pliNumber,
-          matchIndex,
-          index: report.index,
-          itemText: report.itemText,
-          transId: report.transId,
-          title: report.link?.getAttribute?.('title') || getElementText(report.link)
-        }, matchIndex))
-      });
-      return found.map((report, matchIndex) => ({
-        itemNumber: pliNumber,
-        matchIndex,
-        index: report.index,
-        itemText: report.itemText,
-        transId: report.transId,
-        title: report.link?.getAttribute?.('title') || getElementText(report.link)
-      }));
+    const links = await waitFor(() => {
+      const found = findRegulatoryReportLinksByItemNumber(pliNumber);
+      return found.length ? found : null;
     }, 30000, 500);
-    if (!reports?.length) {
-      crmLookupLog('No Regulatory Report links found for item number', { pliNumber });
-      return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
-    }
-    crmLookupLog('Regulatory Report lookup snapshot', {
-      pliNumber,
-      count: reports.length,
-      reports: reports.map(summarizeRegulatoryReport)
-    });
-    for (const [index, report] of reports.entries()) {
-      crmLookupLog('Attempting Regulatory Report', {
-        attempt: index + 1,
-        total: reports.length,
-        report: summarizeRegulatoryReport(report, index)
-      });
-      await expandRegulatoryReports();
-      const link = getRegulatoryReportLink(report);
-      if (!link) {
-        crmLookupLog('Regulatory Report link was not found; falling back to transaction id search', {
-          attempt: index + 1,
-          total: reports.length,
-          report: summarizeRegulatoryReport(report, index)
-        });
-        const cusCode = await readCusAfterTransIdSearch(report, index, reports.length);
-        if (cusCode) return { ok: true, cusCode };
-        continue;
-      }
-      crmLookupLog('Clicking Regulatory Report', {
-        attempt: index + 1,
-        total: reports.length,
-        transId: report.transId,
-        title: report.title,
-        linkText: getElementText(link)
-      });
-      link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
-      activateElement(link, centerOfElement(link));
+    if (!links?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
+    for (const item of links) {
+      item.link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+      activateElement(item.link, centerOfElement(item.link));
       await sleep(2500);
-      let cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
-      crmLookupLog('RB Acknowledgement result after Regulatory Report click', {
-        attempt: index + 1,
-        total: reports.length,
-        transId: report.transId,
-        title: report.title,
-        cusCode: cusCode || ''
-      });
-      if (cusCode) return { ok: true, cusCode };
-      cusCode = await readCusAfterTransIdSearch(report, index, reports.length);
+      const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
-  }
-  async function findCusForEvent({ eventNumber, pliNumber }) {
-    const key = `${eventNumber || ''}-${pliNumber || ''}`;
-    if (cusLookupState.promise && cusLookupState.key === key) {
-      sendBackgroundLog('info', 'Reusing in-flight CRM CUS lookup', { key });
-      return cusLookupState.promise;
-    }
-    cusLookupState.key = key;
-    cusLookupState.promise = runCusLookup({ eventNumber, pliNumber })
-      .finally(() => {
-        if (cusLookupState.key === key) cusLookupState.promise = null;
-      });
-    return cusLookupState.promise;
   }
   function uniqueElements(elements) {
     const seen = new Set();
@@ -601,7 +438,7 @@
       ...usefulClickAncestors(startElement),
       ...usefulClickAncestors(targetInfo.parent)
     ]);
-    sendBackgroundLog('info', 'XML click target', {
+    console.info('[Italy MIR Helper] XML click target:', {
       type: targetInfo.type,
       xmlName: targetInfo.xmlName,
       text: String(targetInfo.text || '').slice(0, 120),
@@ -636,7 +473,7 @@
       return;
     }
     const eventInfo = getEventInfoFromSubject();
-    sendBackgroundLog('info', 'CRM event info before XML click', eventInfo);
+    console.info('[Italy MIR Helper] CRM event info before XML click:', eventInfo);
     const startButton = document.getElementById('mir-helper-start');
     if (startButton) startButton.disabled = true;
     setStatus('Double-clicking the XML filename...');
@@ -698,7 +535,7 @@
     if (conditionMet !== lastConditionState) {
       lastConditionState = conditionMet;
       if (!conditionMet) userDismissed = false;
-      sendBackgroundLog('info', 'CRM condition check', {
+      console.info('[Italy MIR Helper] CRM condition check:', {
         bcc,
         xml,
         conditionMet,
