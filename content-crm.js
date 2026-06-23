@@ -3,6 +3,8 @@
   const REQUIRED_BCC = 'RS.ITALYMIRREPORTS@MEDTRONIC.COM';
   const POPUP_ID = 'mir-helper-popup';
   const CHECK_INTERVAL_MS = 1200;
+  const CRM_READY_POLL_MS = 150;
+  const CRM_CLICK_SETTLE_MS = 75;
   const XML_TEXT_RE = /\.xml\b/i;
   let userDismissed = false;
   let lastConditionState = false;
@@ -324,12 +326,12 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
   async function performQuickSearch(eventNumber) {
-    const input = await waitFor(findQuickSearchInput, 30000, 500);
+    const input = await waitFor(findQuickSearchInput, 30000);
     if (!input) throw new Error('Could not find the CRM quick-search input.');
-    input.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    input.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
     input.focus?.();
     setInputValue(input, eventNumber);
-    await sleep(300);
+    await sleep(CRM_CLICK_SETTLE_MS);
     const go = findQuickSearchGo();
     if (go) {
       const point = centerOfElement(go);
@@ -342,7 +344,7 @@
     const rect = el.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   }
-  async function waitFor(conditionFn, timeoutMs = 20000, intervalMs = 500) {
+  async function waitFor(conditionFn, timeoutMs = 20000, intervalMs = CRM_READY_POLL_MS) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       const result = conditionFn();
@@ -356,14 +358,14 @@
       Array.from(document.querySelectorAll('div')).find((el) => isVisibleElement(el) && /regulatory report/i.test(getElementText(el)));
   }
   async function expandRegulatoryReports() {
-    const container = await waitFor(getRegulatoryReportsContainer, 45000, 500);
+    const container = await waitFor(getRegulatoryReportsContainer, 45000);
     if (!container) throw new Error('Could not find the CRM Regulatory Report section.');
     const wrapper = container.querySelector('.data-wrapper');
     if (wrapper && getComputedStyle(wrapper).display !== 'none') return container;
     const clicker = container.querySelector('.clicker') || container;
-    clicker.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    clicker.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
     activateElement(clicker, centerOfElement(clicker));
-    await waitFor(() => !wrapper || getComputedStyle(wrapper).display !== 'none', 5000, 250);
+    await waitFor(() => !wrapper || getComputedStyle(wrapper).display !== 'none', 5000, CRM_READY_POLL_MS);
     return container;
   }
   function escapeCssValue(value) {
@@ -427,7 +429,7 @@
     if (cusLookupState.searchedEventNumber !== eventNumber) {
       await performQuickSearch(eventNumber);
       cusLookupState.searchedEventNumber = eventNumber;
-      await waitFor(() => getRegulatoryReportsContainer() || /regulatory report/i.test(getElementText(document.body)), 15000, 300);
+      await waitFor(() => getRegulatoryReportsContainer() || /regulatory report/i.test(getElementText(document.body)), 15000);
     }
     await expandRegulatoryReports();
     const reports = await waitFor(() => {
@@ -438,15 +440,17 @@
         transId: report.transId,
         title: report.link?.getAttribute?.('title') || getElementText(report.link)
       })) : null;
-    }, 30000, 500);
+    }, 30000);
     if (!reports?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
     for (const report of reports) {
       await expandRegulatoryReports();
       const link = getRegulatoryReportLink(report);
       if (!link) continue;
-      link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+      link.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
-      const cusCode = await waitFor(readRbAcknowledgement, 12000, 300);
+      const immediateCusCode = readRbAcknowledgement();
+      if (immediateCusCode) return { ok: true, cusCode: immediateCusCode };
+      const cusCode = await waitFor(readRbAcknowledgement, 12000);
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
