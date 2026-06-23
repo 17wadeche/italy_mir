@@ -50,7 +50,7 @@
       overlay.id = CRM_LOCK_OVERLAY_ID;
       overlay.setAttribute('role', 'status');
       overlay.setAttribute('aria-live', 'polite');
-      overlay.innerHTML = '<div class="mir-helper-crm-lock-card"><div class="mir-helper-title">CRM is locked</div><div class="mir-helper-body"></div></div>';
+      overlay.innerHTML = '<div class="mir-helper-crm-lock-card"><div class="mir-helper-title">GCH is locked</div><div class="mir-helper-body"></div></div>';
       document.documentElement.appendChild(overlay);
     }
     const body = overlay.querySelector('.mir-helper-body');
