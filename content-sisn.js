@@ -5,9 +5,11 @@
   const STATUS_ID = 'mir-helper-sisn-status';
   const CHECK_INTERVAL_MS = 1000;
   const MODULE_NEXT_CLICKS_REQUIRED = 4;
-  const MODULE_NEXT_CLICK_DELAY_MS = 1500;
-  const MODULE_PAGE_SETTLE_MS = 1200;
+  const MODULE_NEXT_CLICK_DELAY_MS = 500;
+  const MODULE_PAGE_SETTLE_MS = 700;
   const MODULE_PAGE_SETTLE_TIMEOUT_MS = 45000;
+  const MODULE_POLL_MS = 200;
+  const SCROLL_SETTLE_MS = 250;
   let automationRunning = false;
   let uploadAttemptRunning = false;
   let lastPageSignature = '';
@@ -425,8 +427,21 @@
       });
     return uniqueElements([...roots, ...extra]);
   }
+  function getScrollSignature() {
+    const scrollables = getScrollableElements()
+      .map((el) => `${Math.round(el.scrollTop)}:${Math.round(el.scrollHeight)}:${Math.round(el.clientHeight)}`)
+      .join('|');
+    return [
+      Math.round(window.scrollY || document.documentElement?.scrollTop || 0),
+      Math.round(document.body?.scrollHeight || 0),
+      Math.round(document.documentElement?.scrollHeight || 0),
+      scrollables
+    ].join('|');
+  }
   async function scrollAllTheWayDown() {
-    for (let i = 0; i < 8; i += 1) {
+    let lastSignature = '';
+    let stablePasses = 0;
+    for (let i = 0; i < 5; i += 1) {
       const maxDocHeight = Math.max(
         document.body?.scrollHeight || 0,
         document.documentElement?.scrollHeight || 0,
@@ -438,10 +453,18 @@
       for (const el of getScrollableElements()) {
         try { el.scrollTop = el.scrollHeight; } catch (_) {}
       }
-      await sleep(150);
+      await sleep(SCROLL_SETTLE_MS);
+      const signature = getScrollSignature();
+      if (signature === lastSignature) {
+        stablePasses += 1;
+        if (stablePasses >= 2) return;
+      } else {
+        lastSignature = signature;
+        stablePasses = 0;
+      }
     }
   }
-  async function waitForModuleTransition(previousFingerprint, timeoutMs = 12000, intervalMs = 250) {
+  async function waitForModuleTransition(previousFingerprint, timeoutMs = 12000, intervalMs = MODULE_POLL_MS) {
     const start = Date.now();
     await sleep(MODULE_NEXT_CLICK_DELAY_MS);
     while (Date.now() - start < timeoutMs) {
@@ -483,7 +506,7 @@
       if (!isModuleReportPage() || hasObviousLoadingState()) {
         lastFingerprint = '';
         stableSince = 0;
-        await sleep(400);
+        await sleep(MODULE_POLL_MS);
         continue;
       }
       const fingerprint = getModulePageFingerprint();
@@ -493,7 +516,7 @@
       } else if (Date.now() - stableSince >= stableMs) {
         return true;
       }
-      await sleep(400);
+      await sleep(MODULE_POLL_MS);
     }
     return false;
   }
@@ -527,7 +550,7 @@
         let attentionAction = await handleModuleAttentionIfPresent('before module page wait');
         if (attentionAction === 'recovered') continue;
         if (attentionAction === 'stop') return false;
-        const modulePageState = await waitForModuleReportPageOrAttention(45000, 500);
+        const modulePageState = await waitForModuleReportPageOrAttention(45000, MODULE_POLL_MS);
         if (modulePageState === 'attention') {
           attentionAction = await handleModuleAttentionIfPresent('while waiting for module page');
           if (attentionAction === 'recovered') continue;
@@ -564,11 +587,11 @@
         }
         showStatus(`Scrolling to the bottom and clicking NEXT ${clickNumber} of ${MODULE_NEXT_CLICKS_REQUIRED}...`);
         await scrollAllTheWayDown();
-        await sleep(1000);
+        await sleep(SCROLL_SETTLE_MS);
         attentionAction = await handleModuleAttentionIfPresent(`before clicking NEXT ${clickNumber}`);
         if (attentionAction === 'recovered') continue;
         if (attentionAction === 'stop') return false;
-        const nextButton = await waitFor(findEnabledNextButton, 20000, 400);
+        const nextButton = await waitFor(findEnabledNextButton, 20000, MODULE_POLL_MS);
         if (!nextButton) {
           showStatus(`Could not find an enabled NEXT button for step ${clickNumber}.`, true);
           console.warn('[Italy MIR Helper] Enabled NEXT button not found.', {

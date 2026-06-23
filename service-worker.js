@@ -2,7 +2,7 @@
 const SISN_URL = 'https://sisn.salute.gov.it/app/dmirfe/#/';
 const PENDING_KEY = 'mirHelperPendingSisnStart';
 const MAX_DOWNLOAD_WAIT_MS = 30000;
-const DOWNLOAD_POLL_MS = 500;
+const DOWNLOAD_POLL_MS = 250;
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[Italy MIR Helper] Installed/updated.');
 });
