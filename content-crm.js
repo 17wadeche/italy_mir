@@ -7,6 +7,7 @@
   let userDismissed = false;
   let lastConditionState = false;
   let popupHideTimer = null;
+  let cusLookupState = { key: '', promise: null, searchedEventNumber: '' };
   console.info('[Italy MIR Helper] CRM content script loaded:', {
     url: location.href,
     frame: window.top === window ? 'top' : 'iframe'
@@ -359,7 +360,11 @@
     await sleep(1500);
     return container;
   }
-  function findRegulatoryReportLinksByItemNumber(itemNumber) {
+  function escapeCssValue(value) {
+    if (window.CSS?.escape) return CSS.escape(value);
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+  function getRegulatoryReportRowsByItemNumber(itemNumber) {
     const item = String(itemNumber || '').trim();
     const container = getRegulatoryReportsContainer();
     if (!container || !item) return [];
@@ -369,14 +374,23 @@
       ? container.querySelectorAll('.data')
       : container.querySelectorAll('a.GUIDE-sideNav');
     return Array.from(candidates)
-      .map((el) => {
+      .map((el, index) => {
         const row = el.matches?.('.data') ? el : el.closest?.('.data');
         const link = el.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
         const itemNumberEl = row?.querySelector?.('.item-number');
         const itemText = getElementText(itemNumberEl) || getElementText(row || el);
-        return { row, link, itemText };
+        const transId = link?.getAttribute?.('data-trans-id') || '';
+        return { row, link, itemText, transId, index };
       })
       .filter(({ link, itemText }) => link && itemNumberPattern.test(itemText));
+  }
+  function getRegulatoryReportLink(report) {
+    const container = getRegulatoryReportsContainer();
+    if (!container || !report) return null;
+    if (report.transId) {
+      return container.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
+    }
+    return getRegulatoryReportRowsByItemNumber(report.itemNumber)[report.matchIndex]?.link || null;
   }
   function readRbAcknowledgement() {
     const cell = document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement');
@@ -386,23 +400,47 @@
     const match = cleaned.match(/\bCUS-\d{2,4}-\d+\b/i);
     return match ? match[0].toUpperCase() : '';
   }
-  async function findCusForEvent({ eventNumber, pliNumber }) {
-    await performQuickSearch(eventNumber);
-    await sleep(4000);
+  async function runCusLookup({ eventNumber, pliNumber }) {
+    if (cusLookupState.searchedEventNumber !== eventNumber) {
+      await performQuickSearch(eventNumber);
+      cusLookupState.searchedEventNumber = eventNumber;
+      await sleep(4000);
+    }
     await expandRegulatoryReports();
-    const links = await waitFor(() => {
-      const found = findRegulatoryReportLinksByItemNumber(pliNumber);
-      return found.length ? found : null;
+    const reports = await waitFor(() => {
+      const found = getRegulatoryReportRowsByItemNumber(pliNumber);
+      return found.length ? found.map((report, matchIndex) => ({
+        itemNumber: pliNumber,
+        matchIndex,
+        transId: report.transId,
+        title: report.link?.getAttribute?.('title') || getElementText(report.link)
+      })) : null;
     }, 30000, 500);
-    if (!links?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
-    for (const item of links) {
-      item.link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
-      activateElement(item.link, centerOfElement(item.link));
+    if (!reports?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
+    for (const report of reports) {
+      await expandRegulatoryReports();
+      const link = getRegulatoryReportLink(report);
+      if (!link) continue;
+      link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+      activateElement(link, centerOfElement(link));
       await sleep(2500);
       const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
+  }
+  async function findCusForEvent({ eventNumber, pliNumber }) {
+    const key = `${eventNumber || ''}-${pliNumber || ''}`;
+    if (cusLookupState.promise && cusLookupState.key === key) {
+      console.info('[Italy MIR Helper] Reusing in-flight CRM CUS lookup:', key);
+      return cusLookupState.promise;
+    }
+    cusLookupState.key = key;
+    cusLookupState.promise = runCusLookup({ eventNumber, pliNumber })
+      .finally(() => {
+        if (cusLookupState.key === key) cusLookupState.promise = null;
+      });
+    return cusLookupState.promise;
   }
   function uniqueElements(elements) {
     const seen = new Set();
