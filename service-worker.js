@@ -72,6 +72,42 @@ function tabsSendMessage(tabId, message) {
     });
   });
 }
+function tabsUpdate(tabId, updateProperties) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.update(tabId, updateProperties, (tab) => {
+      const err = chromeLastErrorMessage();
+      if (err) reject(new Error(err));
+      else resolve(tab);
+    });
+  });
+}
+function windowsUpdate(windowId, updateInfo) {
+  return new Promise((resolve) => {
+    if (!windowId) {
+      resolve();
+      return;
+    }
+    chrome.windows.update(windowId, updateInfo, () => resolve());
+  });
+}
+function tabsGet(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.get(tabId, (tab) => {
+      const err = chromeLastErrorMessage();
+      if (err) reject(new Error(err));
+      else resolve(tab);
+    });
+  });
+}
+async function waitForTabComplete(tabId, timeoutMs = 30000) {
+  const endTime = Date.now() + timeoutMs;
+  while (Date.now() < endTime) {
+    const tab = await tabsGet(tabId);
+    if (tab?.status === 'complete') return tab;
+    await sleep(150);
+  }
+  return await tabsGet(tabId);
+}
 function downloadsSearch(query) {
   return new Promise((resolve, reject) => {
     chrome.downloads.search(query, (items) => {
@@ -413,8 +449,13 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
     duplicateTab = await tabsDuplicate(sourceTabId);
     console.info('[Italy MIR Helper] CRM duplicate tab created for CUS lookup:', {
       duplicateTabId: duplicateTab?.id,
-      duplicateUrl: duplicateTab?.url
+      duplicateUrl: duplicateTab?.url,
+      windowId: duplicateTab?.windowId
     });
+    await windowsUpdate(duplicateTab.windowId, { focused: true });
+    duplicateTab = await tabsUpdate(duplicateTab.id, { active: true });
+    await waitForTabComplete(duplicateTab.id, 30000);
+    await sleep(1000);
     const endTime = Date.now() + 120000;
     let lastError = '';
     while (Date.now() < endTime) {

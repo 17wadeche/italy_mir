@@ -389,8 +389,25 @@
     }
   }
   function centerOfElement(el) {
-    const rect = el.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const rect = el?.getBoundingClientRect?.();
+    if (
+      rect &&
+      Number.isFinite(rect.left) &&
+      Number.isFinite(rect.top) &&
+      rect.width > 0 &&
+      rect.height > 0
+    ) {
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      return {
+        x: Math.max(1, Math.min(window.innerWidth - 2, x)),
+        y: Math.max(1, Math.min(window.innerHeight - 2, y))
+      };
+    }
+    return {
+      x: Math.max(1, Math.floor(window.innerWidth / 2)),
+      y: Math.max(1, Math.floor(window.innerHeight / 2))
+    };
   }
   async function waitFor(conditionFn, timeoutMs = 20000, intervalMs = 500) {
     const start = Date.now();
@@ -445,11 +462,10 @@
     regulatoryReportsContainerCache = containers[0] || null;
     return regulatoryReportsContainerCache;
   }
-  function hasVisibleRegulatoryReportRows(container) {
+  function hasRegulatoryReportRows(container) {
     if (!container) return false;
     return Array.from(container.querySelectorAll('.item-number, a.GUIDE-sideNav, a'))
       .some((el) => {
-        if (!isVisibleElement(el)) return false;
         if (el.matches?.('.item-number')) return true;
         return isEuropeanVigilanceReportLink(el);
       });
@@ -457,8 +473,8 @@
   function isRegulatoryReportsExpanded(container) {
     if (!container) return false;
     const wrapper = container.querySelector('.data-wrapper');
-    if (wrapper && getComputedStyle(wrapper).display !== 'none') return true;
-    return hasVisibleRegulatoryReportRows(container);
+    if (wrapper && getComputedStyle(wrapper).display === 'none') return false;
+    return hasRegulatoryReportRows(container);
   }
   async function expandRegulatoryReportsContainer(container) {
     if (!container) return null;
@@ -702,7 +718,7 @@
         console.warn('[Italy MIR Helper] Could not re-find Regulatory Report link:', report);
         continue;
       }
-      ensureElementInView(link);
+      if (isVisibleElement(link)) ensureElementInView(link);
       const beforeFingerprint = getRegReportDetailFingerprint();
       console.info('[Italy MIR Helper] Opening Regulatory Report candidate:', {
         itemNumber: report.itemNumber,
