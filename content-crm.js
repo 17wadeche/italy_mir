@@ -384,13 +384,41 @@
       })
       .filter(({ link, itemText }) => link && itemNumberPattern.test(itemText));
   }
+  function summarizeRegulatoryReport(report, index) {
+    return {
+      index,
+      matchIndex: report?.matchIndex,
+      rowIndex: report?.index,
+      itemNumber: report?.itemNumber,
+      itemText: report?.itemText,
+      transId: report?.transId,
+      title: report?.title
+    };
+  }
   function getRegulatoryReportLink(report) {
     const container = getRegulatoryReportsContainer();
-    if (!container || !report) return null;
-    if (report.transId) {
-      return container.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
+    if (!container || !report) {
+      console.info('[Italy MIR Helper] Regulatory Report link lookup skipped:', {
+        hasContainer: Boolean(container),
+        hasReport: Boolean(report),
+        report: summarizeRegulatoryReport(report)
+      });
+      return null;
     }
-    return getRegulatoryReportRowsByItemNumber(report.itemNumber)[report.matchIndex]?.link || null;
+    if (report.transId) {
+      const link = container.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
+      console.info('[Italy MIR Helper] Regulatory Report link lookup by trans id:', {
+        report: summarizeRegulatoryReport(report),
+        found: Boolean(link)
+      });
+      return link;
+    }
+    const link = getRegulatoryReportRowsByItemNumber(report.itemNumber)[report.matchIndex]?.link || null;
+    console.info('[Italy MIR Helper] Regulatory Report link lookup by duplicate index:', {
+      report: summarizeRegulatoryReport(report),
+      found: Boolean(link)
+    });
+    return link;
   }
   function readRbAcknowledgement() {
     const cell = document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement');
@@ -407,24 +435,74 @@
       await sleep(4000);
     }
     await expandRegulatoryReports();
+    console.info('[Italy MIR Helper] Starting Regulatory Report CUS lookup:', { eventNumber, pliNumber });
     const reports = await waitFor(() => {
       const found = getRegulatoryReportRowsByItemNumber(pliNumber);
-      return found.length ? found.map((report, matchIndex) => ({
+      if (!found.length) return null;
+      console.info('[Italy MIR Helper] Regulatory Report rows matching item number:', {
+        pliNumber,
+        count: found.length,
+        reports: found.map((report, matchIndex) => summarizeRegulatoryReport({
+          itemNumber: pliNumber,
+          matchIndex,
+          index: report.index,
+          itemText: report.itemText,
+          transId: report.transId,
+          title: report.link?.getAttribute?.('title') || getElementText(report.link)
+        }, matchIndex))
+      });
+      return found.map((report, matchIndex) => ({
         itemNumber: pliNumber,
         matchIndex,
+        index: report.index,
+        itemText: report.itemText,
         transId: report.transId,
         title: report.link?.getAttribute?.('title') || getElementText(report.link)
-      })) : null;
+      }));
     }, 30000, 500);
-    if (!reports?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
-    for (const report of reports) {
+    if (!reports?.length) {
+      console.info('[Italy MIR Helper] No Regulatory Report links found for item number:', { pliNumber });
+      return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
+    }
+    console.info('[Italy MIR Helper] Regulatory Report lookup snapshot:', {
+      pliNumber,
+      count: reports.length,
+      reports: reports.map(summarizeRegulatoryReport)
+    });
+    for (const [index, report] of reports.entries()) {
+      console.info('[Italy MIR Helper] Attempting Regulatory Report:', {
+        attempt: index + 1,
+        total: reports.length,
+        report: summarizeRegulatoryReport(report, index)
+      });
       await expandRegulatoryReports();
       const link = getRegulatoryReportLink(report);
-      if (!link) continue;
+      if (!link) {
+        console.info('[Italy MIR Helper] Skipping Regulatory Report because link was not found:', {
+          attempt: index + 1,
+          total: reports.length,
+          report: summarizeRegulatoryReport(report, index)
+        });
+        continue;
+      }
+      console.info('[Italy MIR Helper] Clicking Regulatory Report:', {
+        attempt: index + 1,
+        total: reports.length,
+        transId: report.transId,
+        title: report.title,
+        linkText: getElementText(link)
+      });
       link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
       await sleep(2500);
       const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
+      console.info('[Italy MIR Helper] RB Acknowledgement result after Regulatory Report click:', {
+        attempt: index + 1,
+        total: reports.length,
+        transId: report.transId,
+        title: report.title,
+        cusCode: cusCode || ''
+      });
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
