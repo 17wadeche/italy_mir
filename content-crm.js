@@ -10,6 +10,8 @@
   let cusLookupState = { key: '', promise: null, searchedEventNumber: '' };
   let regulatoryReportsContainerCache = null;
   let regulatoryReportRowsCache = null;
+  const REG_REPORT_DETAIL_TIMEOUT_MS = 3500;
+  const REG_REPORT_DETAIL_POLL_MS = 100;
   console.info('[Italy MIR Helper] CRM content script loaded:', {
     url: location.href,
     frame: window.top === window ? 'top' : 'iframe'
@@ -472,13 +474,16 @@
     return getRegulatoryReportRowsByItemNumber(report.itemNumber)[report.matchIndex]?.link || null;
   }
   function readRbAcknowledgement() {
-    const cell = document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement');
-    const text = (cell ? getElementText(cell) : '') ||
-      getElementText(document.querySelector('[id*="RBAcknowledgement"]'));
-    const directMatch = extractCusCode(text);
-    if (directMatch) return directMatch;
+    const directTargets = [
+      document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement'),
+      document.querySelector('[id*="RBAcknowledgement"]')
+    ].filter(Boolean);
+    for (const target of directTargets) {
+      const directMatch = extractCusCode(getElementText(target));
+      if (directMatch) return directMatch;
+    }
     const labels = Array.from(document.querySelectorAll('label'))
-      .filter((label) => /RB\s*Acknowledgement\s*#?\s*:/i.test(getElementText(label)));
+      .filter((label) => /RB\s*Acknowledgement\s*#?\s*:/i.test(getFastElementText(label)));
     for (const label of labels) {
       const labelTargetId = label.getAttribute('for');
       const target = labelTargetId ? document.getElementById(labelTargetId) : null;
@@ -488,7 +493,10 @@
       const rowMatch = extractCusCode(getElementText(row));
       if (rowMatch) return rowMatch;
     }
-    return extractCusCode(getElementText(document.body));
+    return '';
+  }
+  async function waitForRbAcknowledgement() {
+    return waitFor(readRbAcknowledgement, REG_REPORT_DETAIL_TIMEOUT_MS, REG_REPORT_DETAIL_POLL_MS);
   }
   async function runCusLookup({ eventNumber, pliNumber }) {
     if (cusLookupState.searchedEventNumber !== eventNumber) {
@@ -515,7 +523,7 @@
       if (!link) continue;
       link.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
-      const cusCode = await waitFor(readRbAcknowledgement, 12000, 300);
+      const cusCode = await waitForRbAcknowledgement();
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
