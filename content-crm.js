@@ -416,26 +416,34 @@
       .filter(Boolean)
       .join(' ');
   }
+  function getRegulatoryReportsContainers() {
+    const containers = [];
+    const add = (el) => {
+      if (!el || !(el instanceof Element) || !el.isConnected) return;
+      if (containers.includes(el)) return;
+      containers.push(el);
+    };
+    document.querySelectorAll('.RegulatoryReports').forEach(add);
+    if (!containers.length) {
+      const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, legend, .section-header, .title, .header');
+      for (const heading of headings) {
+        if (!/regulatory report/i.test(getFastElementText(heading))) continue;
+        add(heading.closest('.RegulatoryReports, .section, .panel, .ch-section, .th-section, div') || heading.parentElement);
+      }
+    }
+    if (!containers.length) {
+      for (const div of document.querySelectorAll('div')) {
+        if (isVisibleElement(div) && /regulatory report/i.test(getFastElementText(div))) {
+          add(div);
+        }
+      }
+    }
+    return containers;
+  }
   function getRegulatoryReportsContainer() {
-    if (regulatoryReportsContainerCache?.isConnected) return regulatoryReportsContainerCache;
-    regulatoryReportsContainerCache = document.querySelector('.RegulatoryReports');
-    if (regulatoryReportsContainerCache) return regulatoryReportsContainerCache;
-    const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, legend, .section-header, .title, .header');
-    for (const heading of headings) {
-      if (!/regulatory report/i.test(getFastElementText(heading))) continue;
-      const container = heading.closest('.RegulatoryReports, .section, .panel, .ch-section, .th-section, div') || heading.parentElement;
-      if (isVisibleElement(container)) {
-        regulatoryReportsContainerCache = container;
-        return regulatoryReportsContainerCache;
-      }
-    }
-    for (const div of document.querySelectorAll('div')) {
-      if (isVisibleElement(div) && /regulatory report/i.test(getFastElementText(div))) {
-        regulatoryReportsContainerCache = div;
-        return regulatoryReportsContainerCache;
-      }
-    }
-    return null;
+    const containers = getRegulatoryReportsContainers();
+    regulatoryReportsContainerCache = containers[0] || null;
+    return regulatoryReportsContainerCache;
   }
   function hasVisibleRegulatoryReportRows(container) {
     if (!container) return false;
@@ -452,9 +460,8 @@
     if (wrapper && getComputedStyle(wrapper).display !== 'none') return true;
     return hasVisibleRegulatoryReportRows(container);
   }
-  async function expandRegulatoryReports() {
-    const container = await waitFor(getRegulatoryReportsContainer, 45000, 100);
-    if (!container) throw new Error('Could not find the CRM Regulatory Report section.');
+  async function expandRegulatoryReportsContainer(container) {
+    if (!container) return null;
     if (isRegulatoryReportsExpanded(container)) return container;
     const clicker = container.querySelector('.clicker') || container;
     clicker.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
@@ -462,6 +469,22 @@
     regulatoryReportRowsCache = null;
     await waitFor(() => isRegulatoryReportsExpanded(container), 1500, 75);
     return container;
+  }
+  async function expandAllRegulatoryReports() {
+    const found = await waitFor(() => {
+      const containers = getRegulatoryReportsContainers();
+      return containers.length ? containers : null;
+    }, 45000, 100);
+    if (!found?.length) throw new Error('Could not find the CRM Regulatory Report section.');
+    for (const container of found) {
+      await expandRegulatoryReportsContainer(container);
+      await sleep(100);
+    }
+    return getRegulatoryReportsContainers();
+  }
+  async function expandRegulatoryReports() {
+    const containers = await expandAllRegulatoryReports();
+    return containers[0] || null;
   }
   function escapeCssValue(value) {
     if (window.CSS?.escape) return CSS.escape(value);
@@ -517,20 +540,50 @@
       .map((link, index) => makeRegulatoryReportRow(link, index))
       .filter(({ itemText }) => itemNumberPattern.test(itemText));
   }
-  function getRegulatoryReportRowsByItemNumber(itemNumber) {
+  function getRegulatoryReportRowsByItemNumber(itemNumber, container = getRegulatoryReportsContainer()) {
     const itemNumberPattern = makeItemNumberPattern(itemNumber);
-    if (!itemNumberPattern) return [];
-    const fastRows = findRegulatoryReportRowsByItemNumberFast(itemNumber);
+    if (!itemNumberPattern || !container) return [];
+    const fastRows = findRegulatoryReportRowsByItemNumberFast(itemNumber, container);
     if (fastRows.length) return fastRows;
-    return getRegulatoryReportRows().filter(({ itemText }) => itemNumberPattern.test(itemText));
+    return getRegulatoryReportRows(container).filter(({ itemText }) => itemNumberPattern.test(itemText));
+  }
+  function getRegulatoryReportRowsByItemNumberAcrossContainers(itemNumber) {
+    const results = [];
+    const seen = new Set();
+    getRegulatoryReportsContainers().forEach((container, containerIndex) => {
+      const rows = getRegulatoryReportRowsByItemNumber(itemNumber, container);
+      rows.forEach((row, matchIndex) => {
+        const key = [
+          containerIndex,
+          row.transId || '',
+          matchIndex,
+          normalize(row.itemText || ''),
+          normalize(getFastElementText(row.link) || '')
+        ].join('|');
+        if (seen.has(key)) return;
+        seen.add(key);
+        results.push({
+          ...row,
+          itemNumber,
+          containerIndex,
+          matchIndex
+        });
+      });
+    });
+    return results;
   }
   function getRegulatoryReportLink(report) {
-    const container = getRegulatoryReportsContainer();
-    if (!container || !report) return null;
+    if (!report) return null;
+    const containers = getRegulatoryReportsContainers();
+    const container = Number.isInteger(report.containerIndex)
+      ? containers[report.containerIndex]
+      : getRegulatoryReportsContainer();
+    if (!container) return null;
     if (report.transId) {
-      return container.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
+      const direct = container.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
+      if (direct) return direct;
     }
-    return getRegulatoryReportRowsByItemNumber(report.itemNumber)[report.matchIndex]?.link || null;
+    return getRegulatoryReportRowsByItemNumber(report.itemNumber, container)[report.matchIndex]?.link || null;
   }
   function getRbAcknowledgementElement() {
     return document.getElementById('GUIDE-RegReportDetails-RegulatoryBodyInfo-RBAcknowledgement') ||
@@ -618,14 +671,16 @@
       cusLookupState.searchedEventNumber = eventNumber;
       await waitFor(getRegulatoryReportsContainer, 12000, 75);
     }
-    const container = await expandRegulatoryReports();
+    const containers = await expandAllRegulatoryReports();
     const reports = await waitFor(() => {
-      const found = getRegulatoryReportRowsByItemNumber(pliNumber);
-      return found.length ? found.map((report, matchIndex) => ({
+      const found = getRegulatoryReportRowsByItemNumberAcrossContainers(pliNumber);
+      return found.length ? found.map((report) => ({
         itemNumber: pliNumber,
-        matchIndex,
+        containerIndex: report.containerIndex,
+        matchIndex: report.matchIndex,
         transId: report.transId,
-        title: report.link?.getAttribute?.('title') || getFastElementText(report.link)
+        title: report.link?.getAttribute?.('title') || getFastElementText(report.link),
+        itemText: report.itemText
       })) : null;
     }, 15000, 50);
     if (!reports?.length) {
@@ -635,17 +690,37 @@
         reason: `No Regulatory Report links found for item number ${pliNumber}.`
       };
     }
+    console.info('[Italy MIR Helper] Regulatory Report candidates for CUS lookup:', {
+      itemNumber: pliNumber,
+      containerCount: containers.length,
+      reportCount: reports.length,
+      reports
+    });
     for (const report of reports) {
-      const currentContainer = getRegulatoryReportsContainer() || container;
-      const link =
-        getRegulatoryReportLink(report) ||
-        findRegulatoryReportRowsByItemNumberFast(report.itemNumber, currentContainer)[report.matchIndex]?.link;
-      if (!link) continue;
+      const link = getRegulatoryReportLink(report);
+      if (!link) {
+        console.warn('[Italy MIR Helper] Could not re-find Regulatory Report link:', report);
+        continue;
+      }
       ensureElementInView(link);
       const beforeFingerprint = getRegReportDetailFingerprint();
-      nativeClickElement(link, centerOfElement(link));
-      await waitForRegReportDetailAfterClick(beforeFingerprint, 5000);
+      console.info('[Italy MIR Helper] Opening Regulatory Report candidate:', {
+        itemNumber: report.itemNumber,
+        containerIndex: report.containerIndex,
+        matchIndex: report.matchIndex,
+        transId: report.transId,
+        title: report.title,
+        linkText: getFastElementText(link)
+      });
+      activateElement(link, centerOfElement(link));
+      await waitForRegReportDetailAfterClick(beforeFingerprint, 8000);
       const cusCode = readRbAcknowledgement();
+      console.info('[Italy MIR Helper] RB Acknowledgement check result:', {
+        itemNumber: report.itemNumber,
+        containerIndex: report.containerIndex,
+        matchIndex: report.matchIndex,
+        cusCode
+      });
       if (cusCode) return { ok: true, cusCode };
     }
     return {
