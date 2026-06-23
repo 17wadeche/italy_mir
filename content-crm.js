@@ -705,7 +705,17 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
-    if (window.top === window && !findQuickSearchInput()) return false;
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
+      (async () => {
+        const eventInfo = message.eventInfo || {};
+        console.info('[Italy MIR Helper] CUS lookup message accepted immediately:', eventInfo);
+        return findCusForEvent(eventInfo);
+      })()
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    });
     (async () => findCusForEvent(message.eventInfo || {}))()
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
