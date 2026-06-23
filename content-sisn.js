@@ -10,6 +10,8 @@
   const MODULE_PAGE_SETTLE_TIMEOUT_MS = 45000;
   const MODULE_POLL_MS = 150;
   const SCROLL_SETTLE_MS = 150;
+  const UPLOAD_SELECTION_SETTLE_MS = 800;
+  const UPLOAD_SELECTION_POLL_MS = 100;
   let automationRunning = false;
   let uploadAttemptRunning = false;
   let lastPageSignature = '';
@@ -1406,19 +1408,18 @@
         console.warn('[Italy MIR Helper] XML upload selection failed:', response);
         return false;
       }
-      await waitFor(hasSelectedXmlFile, 3000, 150);
+      await waitFor(() => hasSelectedXmlFile() || findEnabledContinueButton(), UPLOAD_SELECTION_SETTLE_MS, UPLOAD_SELECTION_POLL_MS);
       const selectedNames = getSelectedFileNames();
-      showStatus(`Selected XML file: ${selectedNames[0] || response.filename}. Clicking CONTINUE...`);
+      const displayName = selectedNames[0] || response.filename;
+      showStatus(`Selected XML file: ${displayName}. Clicking CONTINUE...`);
       console.info('[Italy MIR Helper] XML file selected on SISN upload page:', {
         response,
         selectedNames,
         deepFileInputs: getFileInputsDeep().length
       });
-      const clicked = await clickUploadContinueAfterXmlSelected();
-      if (clicked) return true;
-      const continueButton = await waitFor(findEnabledContinueButton, 5000, 150);
+      const continueButton = findEnabledContinueButton() || await waitFor(findEnabledContinueButton, 2500, UPLOAD_SELECTION_POLL_MS);
       if (continueButton) {
-        showStatus(`XML file selected: ${selectedNames[0] || response.filename}. Clicking CONTINUE...`);
+        showStatus(`XML file selected: ${displayName}. Clicking CONTINUE...`);
         clickAt(continueButton);
         uploadContinueClicked = true;
         return true;
@@ -1506,7 +1507,7 @@
         window.setTimeout(run, 500);
       }
     }
-    window.setInterval(scheduleTick, 1500);
+    window.setInterval(scheduleTick, 750);
     const observer = new MutationObserver(scheduleTick);
     observer.observe(document.documentElement, {
       childList: true,
