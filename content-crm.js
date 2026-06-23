@@ -323,8 +323,8 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  async function performQuickSearch(eventNumber) {
-    const input = await waitFor(findQuickSearchInput, 30000, 100);
+  async function performQuickSearch(eventNumber, timeoutMs = 8000) {
+    const input = await waitFor(findQuickSearchInput, timeoutMs, 50);
     if (!input) throw new Error('Could not find the CRM quick-search input.');
     input.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
     input.focus?.();
@@ -637,6 +637,7 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
+    if (window.top === window && !findQuickSearchInput()) return false;
     (async () => findCusForEvent(message.eventInfo || {}))()
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
