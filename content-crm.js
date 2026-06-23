@@ -356,7 +356,7 @@
     const go = findQuickSearchGo();
     if (go) {
       ensureElementInView(go);
-      nativeClickElement(go, centerOfElement(go));
+      activateElement(go, centerOfElement(go));
     } else {
       for (const eventName of ['keydown', 'keypress', 'keyup']) {
         input.dispatchEvent(new KeyboardEvent(eventName, {
