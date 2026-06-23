@@ -390,16 +390,30 @@
     }
     return null;
   }
-  async function expandRegulatoryReports() {
-    const container = await waitFor(getRegulatoryReportsContainer, 45000, 500);
-    if (!container) throw new Error('Could not find the CRM Regulatory Report section.');
+  function hasVisibleRegulatoryReportRows(container) {
+    if (!container) return false;
+    return Array.from(container.querySelectorAll('.item-number, a.GUIDE-sideNav, a'))
+      .some((el) => {
+        if (!isVisibleElement(el)) return false;
+        if (el.matches?.('.item-number')) return true;
+        return isEuropeanVigilanceReportLink(el);
+      });
+  }
+  function isRegulatoryReportsExpanded(container) {
+    if (!container) return false;
     const wrapper = container.querySelector('.data-wrapper');
-    if (wrapper && getComputedStyle(wrapper).display !== 'none') return container;
+    if (wrapper && getComputedStyle(wrapper).display !== 'none') return true;
+    return hasVisibleRegulatoryReportRows(container);
+  }
+  async function expandRegulatoryReports() {
+    const container = await waitFor(getRegulatoryReportsContainer, 45000, 100);
+    if (!container) throw new Error('Could not find the CRM Regulatory Report section.');
+    if (isRegulatoryReportsExpanded(container)) return container;
     const clicker = container.querySelector('.clicker') || container;
     clicker.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
     activateElement(clicker, centerOfElement(clicker));
     regulatoryReportRowsCache = null;
-    await waitFor(() => !wrapper || getComputedStyle(wrapper).display !== 'none', 5000, 250);
+    await waitFor(() => isRegulatoryReportsExpanded(container), 1500, 75);
     return container;
   }
   function escapeCssValue(value) {
@@ -496,7 +510,7 @@
       regulatoryReportRowsCache = null;
       await performQuickSearch(eventNumber);
       cusLookupState.searchedEventNumber = eventNumber;
-      await waitFor(getRegulatoryReportsContainer, 15000, 150);
+      await waitFor(getRegulatoryReportsContainer, 15000, 100);
     }
     await expandRegulatoryReports();
     const reports = await waitFor(() => {
@@ -507,18 +521,36 @@
         transId: report.transId,
         title: report.link?.getAttribute?.('title') || getFastElementText(report.link)
       })) : null;
-    }, 30000, 150);
-    if (!reports?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
+    }, 30000, 75);
+    if (!reports?.length) {
+      return {
+        ok: true,
+        cusCode: '',
+        reason: `No Regulatory Report links found for item number ${pliNumber}.`
+      };
+    }
     for (const report of reports) {
-      const container = await expandRegulatoryReports();
-      const link = getRegulatoryReportLink(report) || findRegulatoryReportRowsByItemNumberFast(report.itemNumber, container)[report.matchIndex]?.link;
+      let container = getRegulatoryReportsContainer();
+      let link =
+        getRegulatoryReportLink(report) ||
+        findRegulatoryReportRowsByItemNumberFast(report.itemNumber, container)[report.matchIndex]?.link;
+      if (!link) {
+        container = await expandRegulatoryReports();
+        link =
+          getRegulatoryReportLink(report) ||
+          findRegulatoryReportRowsByItemNumberFast(report.itemNumber, container)[report.matchIndex]?.link;
+      }
       if (!link) continue;
       link.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
-      const cusCode = await waitFor(readRbAcknowledgement, 12000, 300);
+      const cusCode = await waitFor(readRbAcknowledgement, 12000, 150);
       if (cusCode) return { ok: true, cusCode };
     }
-    return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
+    return {
+      ok: true,
+      cusCode: '',
+      reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.`
+    };
   }
   async function findCusForEvent({ eventNumber, pliNumber }) {
     const key = `${eventNumber || ''}-${pliNumber || ''}`;

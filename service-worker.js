@@ -428,7 +428,7 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
       } catch (error) {
         lastError = error?.message || String(error);
       }
-      await sleep(500);
+      await sleep(125);
     }
     return { ok: false, cusCode: '', error: lastError || 'Timed out waiting for CRM CUS lookup.' };
   } finally {
