@@ -452,25 +452,23 @@ async function handleOpenSisn(message, sender) {
     cusLookupPending: lookupNeeded,
     cusLookup: lookupNeeded ? { ok: true, cusCode: '', pending: true } : { ok: true, cusCode: '', skipped: true }
   };
-  await storageSet({ [PENDING_KEY]: payload });
-  const tab = await tabsCreate({ url: SISN_URL, active: true });
-  if (!lookupNeeded) return { ok: true, tabId: tab?.id || null };
+  if (!lookupNeeded) {
+    await storageSet({ [PENDING_KEY]: payload });
+    const tab = await tabsCreate({ url: SISN_URL, active: true });
+    return { ok: true, tabId: tab?.id || null, cusLookup: payload.cusLookup };
+  }
   const lookupResult = await lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo });
   if (!lookupResult?.ok) {
     console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
   }
-  const latest = await storageGet(PENDING_KEY);
-  const current = latest?.[PENDING_KEY];
-  if (current?.value && current.createdAt === payload.createdAt) {
-    await storageSet({
-      [PENDING_KEY]: {
-        ...current,
-        cusCode: lookupResult?.cusCode || '',
-        cusLookupPending: false,
-        cusLookup: lookupResult || null
-      }
-    });
-  }
+  const readyPayload = {
+    ...payload,
+    cusCode: lookupResult?.cusCode || '',
+    cusLookupPending: false,
+    cusLookup: lookupResult || null
+  };
+  await storageSet({ [PENDING_KEY]: readyPayload });
+  const tab = await tabsCreate({ url: SISN_URL, active: true });
   return { ok: true, tabId: tab?.id || null, cusLookup: lookupResult || null };
 }
 async function handleUploadLatestXml(sender) {

@@ -354,8 +354,14 @@
     return null;
   }
   function getRegulatoryReportsContainer() {
-    return document.querySelector('.RegulatoryReports') ||
-      Array.from(document.querySelectorAll('div')).find((el) => isVisibleElement(el) && /regulatory report/i.test(getElementText(el)));
+    const direct = document.querySelector('.RegulatoryReports, [class*="RegulatoryReports"], [id*="RegulatoryReports"]');
+    if (direct) return direct;
+    const navLink = document.querySelector('a.GUIDE-sideNav[title="European Vigilance"], a.GUIDE-sideNav[data-trans-id]');
+    const navContainer = navLink?.closest?.('.RegulatoryReports, [class*="RegulatoryReports"], [id*="RegulatoryReports"], .assignmentblock, .data-wrapper');
+    if (navContainer) return navContainer;
+    return Array.from(document.querySelectorAll('[title*="Regulatory Report"], [aria-label*="Regulatory Report"]'))
+      .map((el) => el.closest?.('.RegulatoryReports, [class*="RegulatoryReports"], [id*="RegulatoryReports"], .assignmentblock, div') || el)
+      .find(isVisibleElement) || null;
   }
   async function expandRegulatoryReports() {
     const container = await waitFor(getRegulatoryReportsContainer, 45000);
@@ -429,7 +435,6 @@
     if (cusLookupState.searchedEventNumber !== eventNumber) {
       await performQuickSearch(eventNumber);
       cusLookupState.searchedEventNumber = eventNumber;
-      await waitFor(() => getRegulatoryReportsContainer() || /regulatory report/i.test(getElementText(document.body)), 15000);
     }
     await expandRegulatoryReports();
     const reports = await waitFor(() => {
