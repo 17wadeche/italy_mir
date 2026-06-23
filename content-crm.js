@@ -428,6 +428,25 @@
     const match = cleaned.match(/\bCUS-\d{2,4}-\d+\b/i);
     return match ? match[0].toUpperCase() : '';
   }
+  async function readCusAfterTransIdSearch(report, index, total) {
+    if (!report?.transId) return '';
+    console.info('[Italy MIR Helper] Searching Regulatory Report by transaction id:', {
+      attempt: index + 1,
+      total,
+      report: summarizeRegulatoryReport(report, index)
+    });
+    await performQuickSearch(report.transId);
+    await sleep(4000);
+    const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
+    console.info('[Italy MIR Helper] RB Acknowledgement result after transaction id search:', {
+      attempt: index + 1,
+      total,
+      transId: report.transId,
+      title: report.title,
+      cusCode: cusCode || ''
+    });
+    return cusCode || '';
+  }
   async function runCusLookup({ eventNumber, pliNumber }) {
     if (cusLookupState.searchedEventNumber !== eventNumber) {
       await performQuickSearch(eventNumber);
@@ -478,11 +497,13 @@
       await expandRegulatoryReports();
       const link = getRegulatoryReportLink(report);
       if (!link) {
-        console.info('[Italy MIR Helper] Skipping Regulatory Report because link was not found:', {
+        console.info('[Italy MIR Helper] Regulatory Report link was not found; falling back to transaction id search:', {
           attempt: index + 1,
           total: reports.length,
           report: summarizeRegulatoryReport(report, index)
         });
+        const cusCode = await readCusAfterTransIdSearch(report, index, reports.length);
+        if (cusCode) return { ok: true, cusCode };
         continue;
       }
       console.info('[Italy MIR Helper] Clicking Regulatory Report:', {
@@ -495,7 +516,7 @@
       link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
       await sleep(2500);
-      const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
+      let cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
       console.info('[Italy MIR Helper] RB Acknowledgement result after Regulatory Report click:', {
         attempt: index + 1,
         total: reports.length,
@@ -503,6 +524,8 @@
         title: report.title,
         cusCode: cusCode || ''
       });
+      if (cusCode) return { ok: true, cusCode };
+      cusCode = await readCusAfterTransIdSearch(report, index, reports.length);
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
