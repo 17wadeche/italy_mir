@@ -762,6 +762,94 @@
     }
     return !getBlockingAttentionMessage();
   }
+  function getCusNotFoundDialogElement() {
+    const candidates = deepQuerySelectorAll((el) => {
+      const text = String(getElementText(el) || '').replace(/\s+/g, ' ').trim();
+      if (!/\bcus\s+not\s+found\b/i.test(text)) return false;
+      if (!isVisible(el)) return false;
+      return isVisibleBlockingDialogCandidate(el, text) || /dialog|modal|overlay|notice/i.test(`${el.tagName || ''} ${el.className || ''}`);
+    });
+    return candidates
+      .map((el) => {
+        const rect = el.getBoundingClientRect?.() || { width: 0, height: 0, top: 0, left: 0 };
+        const tag = String(el.tagName || '').toLowerCase();
+        const role = String(el.getAttribute?.('role') || '').toLowerCase();
+        const className = String(el.className || '');
+        const priority = tag.includes('dialog') ? 0 : (role.includes('dialog') ? 5 : (/dialog|modal|overlay|notice/i.test(className) ? 10 : 30));
+        const centerPenalty = Math.abs((rect.left + rect.width / 2) - window.innerWidth / 2) / 100 + Math.abs((rect.top + rect.height / 2) - window.innerHeight / 2) / 100;
+        return { el, score: priority + centerPenalty + Math.max(0, 700 - rect.width) / 250 };
+      })
+      .sort((a, b) => a.score - b.score)[0]?.el || null;
+  }
+  function hasCusNotFoundDialog() {
+    return Boolean(getCusNotFoundDialogElement());
+  }
+  function findCusNotFoundCloseButton(dialog) {
+    const dialogRect = dialog?.getBoundingClientRect?.();
+    const candidates = deepQuerySelectorAll((el) => {
+      if (!el.matches?.('button, a, [role="button"], ds-icon-button, lion-icon, svg, .close, .close-button, [aria-label]')) return false;
+      if (!isVisible(el)) return false;
+      const rect = el.getBoundingClientRect();
+      if (dialogRect && !isPointInsideRect(rect, dialogRect)) return false;
+      const text = normalize(getElementText(el));
+      const cls = String(el.className || '');
+      const iconId = String(el.getAttribute?.('icon-id') || '');
+      const icoType = String(el.getAttribute?.('ico-type') || '');
+      return /close|chiudi|dismiss|×|x/i.test(text) || /close|chiudi|times|xmark|cancel/i.test(`${cls} ${iconId} ${icoType}`) || (dialogRect && rect.top < dialogRect.top + 90 && rect.right > dialogRect.right - 120);
+    });
+    return candidates
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = normalize(getElementText(el));
+        const topRightScore = dialogRect ? Math.abs(rect.top - (dialogRect.top + 30)) + Math.abs(rect.right - (dialogRect.right - 25)) : 0;
+        const textBonus = /close|chiudi|dismiss|×|x/i.test(text) ? -50 : 0;
+        return { el, score: topRightScore + textBonus };
+      })
+      .sort((a, b) => a.score - b.score)[0]?.el || null;
+  }
+  async function closeCusNotFoundDialog() {
+    const dialog = getCusNotFoundDialogElement();
+    const closeButton = findCusNotFoundCloseButton(dialog);
+    if (closeButton) {
+      clickAt(closeButton);
+      await waitFor(() => !hasCusNotFoundDialog(), 5000, 200);
+      if (!hasCusNotFoundDialog()) return true;
+    }
+    if (dialog) {
+      const rect = dialog.getBoundingClientRect();
+      clickPoint({ x: Math.max(1, rect.right - 34), y: Math.max(1, rect.top + 34) });
+      await waitFor(() => !hasCusNotFoundDialog(), 5000, 200);
+      if (!hasCusNotFoundDialog()) return true;
+    }
+    for (const eventName of ['keydown', 'keyup']) {
+      document.dispatchEvent(new KeyboardEvent(eventName, { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
+      window.dispatchEvent(new KeyboardEvent(eventName, { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
+    }
+    await waitFor(() => !hasCusNotFoundDialog(), 3000, 200);
+    return !hasCusNotFoundDialog();
+  }
+  function promptCusNotFoundChoice(cusCode) {
+    return new Promise((resolve) => {
+      document.getElementById('mir-helper-cus-not-found-choice')?.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'mir-helper-cus-not-found-choice';
+      overlay.innerHTML = `
+        <div class="mir-helper-choice-card" role="dialog" aria-modal="true" aria-labelledby="mir-helper-cus-not-found-title">
+          <div id="mir-helper-cus-not-found-title" class="mir-helper-title">CUS not found</div>
+          <div class="mir-helper-body">SISN could not find${cusCode ? ` ${cusCode}` : ' the CUS'}. Choose how to continue.</div>
+          <button type="button" class="mir-helper-primary" data-choice="submit-new">Submit as new, I don't have a valid CUS</button>
+          <button type="button" class="mir-helper-secondary" data-choice="edit-stop">Edit CUS and Stop Automation</button>
+        </div>`;
+      overlay.addEventListener('click', (event) => {
+        const button = event.target?.closest?.('button[data-choice]');
+        if (!button) return;
+        const choice = button.getAttribute('data-choice');
+        overlay.remove();
+        resolve(choice);
+      });
+      document.documentElement.appendChild(overlay);
+    });
+  }
   function findEnabledBackButton() {
     const candidates = deepQuerySelectorAll((el) => {
       if (!el.matches?.('button, a, [role="button"], input[type="button"], input[type="submit"], ds-button')) return false;
@@ -1179,6 +1267,18 @@
     }
     showStatus('Opening the XML upload step...');
     clickAt(continueButton);
+    const cusNotFound = await waitFor(hasCusNotFoundDialog, 10000, 300);
+    if (cusNotFound) {
+      const choice = await promptCusNotFoundChoice(cusCode);
+      await closeCusNotFoundDialog();
+      if (choice === 'submit-new') {
+        showStatus('CUS not found. Restarting with “I don’t have any code”...');
+        return false;
+      }
+      showStatus('CUS not found. Automation stopped so you can edit the CUS.', true);
+      clearPending();
+      return 'stop';
+    }
     return true;
   }
   async function selectNoCodeAndContinue() {
@@ -1318,7 +1418,9 @@
       }
       if (referencePage || /#\/?$/.test(location.hash || '')) {
         const cusCode = String(pending?.cusCode || '').trim();
-        const moved = cusCode ? (await selectCusAndContinue(cusCode) || await selectNoCodeAndContinue()) : await selectNoCodeAndContinue();
+        const cusMoveResult = cusCode ? await selectCusAndContinue(cusCode) : false;
+        if (cusMoveResult === 'stop') return;
+        const moved = cusMoveResult || await selectNoCodeAndContinue();
         if (moved) {
           await waitFor(() => hasUploadPageText() || hasFileInput(), 45000, 500);
           const continued = await selectDownloadedXmlOnUploadPage();
