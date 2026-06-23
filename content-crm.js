@@ -3,8 +3,6 @@
   const REQUIRED_BCC = 'RS.ITALYMIRREPORTS@MEDTRONIC.COM';
   const POPUP_ID = 'mir-helper-popup';
   const CHECK_INTERVAL_MS = 1200;
-  const CRM_READY_POLL_MS = 150;
-  const CRM_CLICK_SETTLE_MS = 75;
   const XML_TEXT_RE = /\.xml\b/i;
   let userDismissed = false;
   let lastConditionState = false;
@@ -326,12 +324,12 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
   async function performQuickSearch(eventNumber) {
-    const input = await waitFor(findQuickSearchInput, 30000);
+    const input = await waitFor(findQuickSearchInput, 30000, 500);
     if (!input) throw new Error('Could not find the CRM quick-search input.');
-    input.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
+    input.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
     input.focus?.();
     setInputValue(input, eventNumber);
-    await sleep(CRM_CLICK_SETTLE_MS);
+    await sleep(300);
     const go = findQuickSearchGo();
     if (go) {
       const point = centerOfElement(go);
@@ -344,7 +342,7 @@
     const rect = el.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   }
-  async function waitFor(conditionFn, timeoutMs = 20000, intervalMs = CRM_READY_POLL_MS) {
+  async function waitFor(conditionFn, timeoutMs = 20000, intervalMs = 500) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       const result = conditionFn();
@@ -354,24 +352,18 @@
     return null;
   }
   function getRegulatoryReportsContainer() {
-    const direct = document.querySelector('.RegulatoryReports, [class*="RegulatoryReports"], [id*="RegulatoryReports"]');
-    if (direct) return direct;
-    const navLink = document.querySelector('a.GUIDE-sideNav[title="European Vigilance"], a.GUIDE-sideNav[data-trans-id]');
-    const navContainer = navLink?.closest?.('.RegulatoryReports, [class*="RegulatoryReports"], [id*="RegulatoryReports"], .assignmentblock, .data-wrapper');
-    if (navContainer) return navContainer;
-    return Array.from(document.querySelectorAll('[title*="Regulatory Report"], [aria-label*="Regulatory Report"]'))
-      .map((el) => el.closest?.('.RegulatoryReports, [class*="RegulatoryReports"], [id*="RegulatoryReports"], .assignmentblock, div') || el)
-      .find(isVisibleElement) || null;
+    return document.querySelector('.RegulatoryReports') ||
+      Array.from(document.querySelectorAll('div')).find((el) => isVisibleElement(el) && /regulatory report/i.test(getElementText(el)));
   }
   async function expandRegulatoryReports() {
-    const container = await waitFor(getRegulatoryReportsContainer, 45000);
+    const container = await waitFor(getRegulatoryReportsContainer, 45000, 500);
     if (!container) throw new Error('Could not find the CRM Regulatory Report section.');
     const wrapper = container.querySelector('.data-wrapper');
     if (wrapper && getComputedStyle(wrapper).display !== 'none') return container;
     const clicker = container.querySelector('.clicker') || container;
-    clicker.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
+    clicker.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
     activateElement(clicker, centerOfElement(clicker));
-    await waitFor(() => !wrapper || getComputedStyle(wrapper).display !== 'none', 5000, CRM_READY_POLL_MS);
+    await waitFor(() => !wrapper || getComputedStyle(wrapper).display !== 'none', 5000, 250);
     return container;
   }
   function escapeCssValue(value) {
@@ -435,6 +427,7 @@
     if (cusLookupState.searchedEventNumber !== eventNumber) {
       await performQuickSearch(eventNumber);
       cusLookupState.searchedEventNumber = eventNumber;
+      await waitFor(() => getRegulatoryReportsContainer() || /regulatory report/i.test(getElementText(document.body)), 15000, 300);
     }
     await expandRegulatoryReports();
     const reports = await waitFor(() => {
@@ -445,17 +438,15 @@
         transId: report.transId,
         title: report.link?.getAttribute?.('title') || getElementText(report.link)
       })) : null;
-    }, 30000);
+    }, 30000, 500);
     if (!reports?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
     for (const report of reports) {
       await expandRegulatoryReports();
       const link = getRegulatoryReportLink(report);
       if (!link) continue;
-      link.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
+      link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
-      const immediateCusCode = readRbAcknowledgement();
-      if (immediateCusCode) return { ok: true, cusCode: immediateCusCode };
-      const cusCode = await waitFor(readRbAcknowledgement, 12000);
+      const cusCode = await waitFor(readRbAcknowledgement, 12000, 300);
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };
@@ -645,11 +636,6 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
-    const hasLookupUi = Boolean(findQuickSearchInput() || getRegulatoryReportsContainer());
-    if (!hasLookupUi) {
-      sendResponse({ ok: false, error: 'CRM lookup UI is not in this frame yet.' });
-      return false;
-    }
     (async () => findCusForEvent(message.eventInfo || {}))()
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));

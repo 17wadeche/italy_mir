@@ -1158,23 +1158,6 @@
       if (/Extension context invalidated/i.test(error?.message || String(error))) extensionContextUnavailableResult();
     }
   }
-  async function waitForCusLookupIfPending(pending, timeoutMs = 20000) {
-    if (!pending?.cusLookupPending) return pending;
-    const startedAt = Date.now();
-    showStatus('Waiting for CRM RB Acknowledgement # lookup...');
-    while (Date.now() - startedAt < timeoutMs) {
-      await sleep(500);
-      const latest = await getPending();
-      if (!latest) return latest;
-      if (!latest.cusLookupPending) return latest;
-    }
-    const lookupSummary = pending?.cusLookup
-      ? JSON.stringify(pending.cusLookup, null, 0)
-      : 'no lookup details';
-    console.info(`[Italy MIR Helper] CRM CUS lookup still pending after ${timeoutMs}ms; continuing with no-code flow. ${lookupSummary}`);
-    showStatus('CRM RB Acknowledgement # lookup is still running; continuing without a CUS code.', false, 5000);
-    return { ...pending, cusLookupPending: false };
-  }
   function sendUploadMessage() {
     return new Promise((resolve) => {
       if (!isExtensionContextAvailable()) {
@@ -1474,9 +1457,7 @@
         return;
       }
       if (referencePage || /#\/?$/.test(location.hash || '')) {
-        const readyPending = await waitForCusLookupIfPending(pending);
-        if (!readyPending) return;
-        const cusCode = String(readyPending?.cusCode || '').trim();
+        const cusCode = String(pending?.cusCode || '').trim();
         const cusMoveResult = cusCode ? await selectCusAndContinue(cusCode) : false;
         if (cusMoveResult === 'stop') return;
         const moved = cusMoveResult || await selectNoCodeAndContinue();
