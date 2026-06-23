@@ -395,22 +395,6 @@ async function setDownloadedFileOnSisnTab(tabId, filePath) {
     if (attached) await debuggerDetach(target);
   }
 }
-async function updatePendingCusLookup(update) {
-  try {
-    const result = await storageGet(PENDING_KEY);
-    const pending = result?.[PENDING_KEY];
-    if (!pending?.value) return;
-    await storageSet({
-      [PENDING_KEY]: {
-        ...pending,
-        ...update,
-        cusLookupUpdatedAt: Date.now()
-      }
-    });
-  } catch (error) {
-    console.warn('[Italy MIR Helper] Could not update pending CUS lookup:', error?.message || String(error));
-  }
-}
 async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
   if (!sourceTabId || !eventInfo?.eventNumber || !eventInfo?.pliNumber) {
     console.warn('[Italy MIR Helper] Skipping CRM tab duplicate for CUS lookup because required data is missing:', {
@@ -455,7 +439,10 @@ async function handleOpenSisn(message, sender) {
   const sourceTabId = sender?.tab?.id || null;
   const eventInfo = message?.eventInfo || {};
   const downloadStartedAt = Number(message?.downloadStartedAt || now);
-  const shouldLookupCus = Boolean(sourceTabId && eventInfo?.eventNumber && eventInfo?.pliNumber);
+  const lookupResult = await lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo });
+  if (!lookupResult?.ok) {
+    console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
+  }
   const payload = {
     value: true,
     createdAt: now,
@@ -464,31 +451,12 @@ async function handleOpenSisn(message, sender) {
     expectedXmlName: message?.xmlName || '',
     crmTabId: sourceTabId,
     eventInfo,
-    cusCode: '',
-    cusLookup: shouldLookupCus ? { ok: false, pending: true } : { ok: true, cusCode: '', skipped: true },
-    cusLookupInProgress: shouldLookupCus
+    cusCode: lookupResult?.cusCode || '',
+    cusLookup: lookupResult || null
   };
   await storageSet({ [PENDING_KEY]: payload });
   const tab = await tabsCreate({ url: SISN_URL, active: true });
-  if (shouldLookupCus) {
-    lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo })
-      .then((lookupResult) => {
-        if (!lookupResult?.ok) {
-          console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
-        }
-        return updatePendingCusLookup({
-          cusCode: lookupResult?.cusCode || '',
-          cusLookup: lookupResult || null,
-          cusLookupInProgress: false
-        });
-      })
-      .catch((error) => updatePendingCusLookup({
-        cusCode: '',
-        cusLookup: { ok: false, error: error?.message || String(error) },
-        cusLookupInProgress: false
-      }));
-  }
-  return { ok: true, tabId: tab?.id || null, cusLookupInProgress: shouldLookupCus };
+  return { ok: true, tabId: tab?.id || null };
 }
 async function handleUploadLatestXml(sender) {
   const tabId = sender?.tab?.id;

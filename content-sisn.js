@@ -1086,7 +1086,7 @@
   async function waitFor(conditionFn, timeoutMs = 20000, intervalMs = 500) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      const result = await conditionFn();
+      const result = conditionFn();
       if (result) return result;
       await sleep(intervalMs);
     }
@@ -1283,17 +1283,6 @@
     input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true }));
   }
-  async function waitForCusLookupResult(pending) {
-    if (!pending?.cusLookupInProgress || pending?.cusCode) return pending;
-    showStatus('Waiting for CRM CUS lookup while the portal loads...');
-    const updated = await waitFor(async () => {
-      const nextPending = await getPending();
-      if (!nextPending) return pending;
-      if (!nextPending.cusLookupInProgress || nextPending.cusCode) return nextPending;
-      return null;
-    }, 20000, 500);
-    return updated || pending;
-  }
   async function selectCusAndContinue(cusCode) {
     showStatus(`Selecting CUS and entering ${cusCode}...`);
     const option = await waitFor(findDirectCusRadioTarget, 35000, 500);
@@ -1468,8 +1457,7 @@
         return;
       }
       if (referencePage || /#\/?$/.test(location.hash || '')) {
-        const readyPending = await waitForCusLookupResult(pending);
-        const cusCode = String(readyPending?.cusCode || '').trim();
+        const cusCode = String(pending?.cusCode || '').trim();
         const cusMoveResult = cusCode ? await selectCusAndContinue(cusCode) : false;
         if (cusMoveResult === 'stop') return;
         const moved = cusMoveResult || await selectNoCodeAndContinue();
