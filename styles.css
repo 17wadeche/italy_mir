@@ -80,3 +80,24 @@
   border-color: #b00020;
   color: #b00020;
 }
+#mir-helper-cus-not-found-choice {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
+  font-family: Arial, Helvetica, sans-serif;
+}
+#mir-helper-cus-not-found-choice .mir-helper-choice-card {
+  width: min(420px, 100%);
+  box-sizing: border-box;
+  padding: 18px;
+  border: 2px solid #0072ce;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #17324d;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
+}
