@@ -426,7 +426,7 @@ async function setDownloadedFileOnSisnTab(tabId, filePath) {
 }
 async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
   if (!sourceTabId || !eventInfo?.eventNumber || !eventInfo?.pliNumber) {
-    console.warn('[Italy MIR Helper] Skipping CRM tab duplicate for CUS lookup because required data is missing:', {
+    console.warn('[Italy MIR Helper] Skipping GCH tab duplicate for CUS lookup because required data is missing:', {
       sourceTabId,
       eventInfo
     });
@@ -434,12 +434,12 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
   }
   let duplicateTab = null;
   try {
-    console.info('[Italy MIR Helper] Duplicating CRM tab for CUS lookup:', {
+    console.info('[Italy MIR Helper] Duplicating GCH tab for CUS lookup:', {
       sourceTabId,
       eventInfo
     });
     duplicateTab = await tabsDuplicate(sourceTabId);
-    console.info('[Italy MIR Helper] CRM duplicate tab created for CUS lookup:', {
+    console.info('[Italy MIR Helper] GCH duplicate tab created for CUS lookup:', {
       duplicateTabId: duplicateTab?.id,
       duplicateUrl: duplicateTab?.url,
       windowId: duplicateTab?.windowId
@@ -452,10 +452,10 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
       await tabsSendMessage(duplicateTab.id, {
         type: 'MIR_HELPER_CRM_SET_USER_LOCK',
         locked: true,
-        message: 'Looking up CUS in CRM. Please wait until the automation closes this tab.'
+        message: 'Looking up CUS in GCH. Please wait until the automation closes this tab.'
       });
     } catch (error) {
-      console.warn('[Italy MIR Helper] Could not lock CRM duplicate tab during CUS lookup:', error?.message || String(error));
+      console.warn('[Italy MIR Helper] Could not lock GCH duplicate tab during CUS lookup:', error?.message || String(error));
     }
     const endTime = Date.now() + 120000;
     let lastError = '';
@@ -466,13 +466,13 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
           eventInfo
         });
         if (response?.ok) return response;
-        lastError = response?.error || 'Unknown CRM CUS lookup error.';
+        lastError = response?.error || 'Unknown GCH CUS lookup error.';
       } catch (error) {
         lastError = error?.message || String(error);
       }
       await sleep(125);
     }
-    return { ok: false, cusCode: '', error: lastError || 'Timed out waiting for CRM CUS lookup.' };
+    return { ok: false, cusCode: '', error: lastError || 'Timed out waiting for GCH CUS lookup.' };
   } finally {
     if (duplicateTab?.id) {
       try {
@@ -521,11 +521,11 @@ async function resolveAndStoreXmlDownload({ sinceMs, expectedXmlName }) {
 async function lookupAndStoreCus({ sourceTabId, eventInfo }) {
   const lookupResult = await lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo });
   if (!lookupResult?.ok) {
-    console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
+    console.warn('[Italy MIR Helper] GCH CUS lookup failed; continuing with no-code flow.', lookupResult);
   }
   await mergePendingSisnStart({
     cusCode: lookupResult?.cusCode || '',
-    cusLookup: lookupResult || { ok: false, pending: false, error: 'Unknown CRM CUS lookup error.' }
+    cusLookup: lookupResult || { ok: false, pending: false, error: 'Unknown GCH CUS lookup error.' }
   });
 }
 async function handleOpenSisn(message, sender) {
@@ -549,7 +549,7 @@ async function handleOpenSisn(message, sender) {
   await storageSet({ [PENDING_KEY]: basePayload });
   const tab = await tabsCreate({ url: SISN_URL, active: true });
   lookupAndStoreCus({ sourceTabId, eventInfo }).catch((error) => {
-    console.warn('[Italy MIR Helper] Background CRM CUS lookup failed:', error?.message || String(error));
+    console.warn('[Italy MIR Helper] Background GCH CUS lookup failed:', error?.message || String(error));
   });
   resolveAndStoreXmlDownload({ sinceMs: downloadStartedAt, expectedXmlName }).catch((error) => {
     console.warn('[Italy MIR Helper] Background XML download resolution failed:', error?.message || String(error));

@@ -12,27 +12,6 @@
   const SCROLL_SETTLE_MS = 150;
   const UPLOAD_SELECTION_SETTLE_MS = 800;
   const UPLOAD_SELECTION_POLL_MS = 100;
-  const SISN_LOCK_OVERLAY_ID = 'mir-helper-sisn-lock-overlay';
-  const SISN_LOCK_EVENTS = [
-    'beforeinput',
-    'input',
-    'keydown',
-    'keypress',
-    'keyup',
-    'paste',
-    'cut',
-    'drop',
-    'dragover',
-    'pointerdown',
-    'pointerup',
-    'mousedown',
-    'mouseup',
-    'click',
-    'dblclick',
-    'contextmenu',
-    'touchstart',
-    'touchend'
-  ];
   let automationRunning = false;
   let uploadAttemptRunning = false;
   let lastPageSignature = '';
@@ -144,47 +123,6 @@
     const el = document.elementFromPoint(point.x, point.y);
     if (!el) return false;
     return clickAt(el, point);
-  }
-  function blockTrustedSisnLockEvent(event) {
-    if (!sisnLockInstalled || !event?.isTrusted) return;
-    event.preventDefault?.();
-    event.stopImmediatePropagation?.();
-    event.stopPropagation?.();
-  }
-  function ensureSisnLockOverlay(message = 'SISN automation is running. Please wait...') {
-    if (!document.documentElement) return;
-    let overlay = document.getElementById(SISN_LOCK_OVERLAY_ID);
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = SISN_LOCK_OVERLAY_ID;
-      overlay.setAttribute('role', 'status');
-      overlay.setAttribute('aria-live', 'polite');
-      overlay.innerHTML = '<div class="mir-helper-sisn-lock-card"><div class="mir-helper-title">SISN is locked</div><div class="mir-helper-body"></div></div>';
-      document.documentElement.appendChild(overlay);
-    }
-    const body = overlay.querySelector('.mir-helper-body');
-    if (body) body.textContent = message;
-  }
-  function setSisnUserLock(locked, message) {
-    if (locked) {
-      if (!sisnLockInstalled) {
-        SISN_LOCK_EVENTS.forEach((eventName) => {
-          window.addEventListener(eventName, blockTrustedSisnLockEvent, { capture: true });
-          document.addEventListener(eventName, blockTrustedSisnLockEvent, { capture: true });
-        });
-        sisnLockInstalled = true;
-      }
-      ensureSisnLockOverlay(message);
-      return;
-    }
-    if (sisnLockInstalled) {
-      SISN_LOCK_EVENTS.forEach((eventName) => {
-        window.removeEventListener(eventName, blockTrustedSisnLockEvent, { capture: true });
-        document.removeEventListener(eventName, blockTrustedSisnLockEvent, { capture: true });
-      });
-      sisnLockInstalled = false;
-    }
-    document.getElementById(SISN_LOCK_OVERLAY_ID)?.remove();
   }
   let statusHideTimer = null;
     function showStatus(message, isError = false, autoHideMs = 0) {
@@ -795,7 +733,6 @@
   }
   function stopWithAttentionMessage(message, context = '') {
     const shortMessage = message.length > 240 ? `${message.slice(0, 240)}...` : message;
-    setSisnUserLock(false);
     showStatus(`SISN showed a blocking popup. Automation stopped. ${shortMessage}`, true);
     console.warn('[Italy MIR Helper] Stopping automation because SISN displayed a blocking dialog.', {
       href: location.href,
@@ -946,7 +883,6 @@
   }
   function promptCusNotFoundChoice(cusCode) {
     return new Promise((resolve) => {
-      setSisnUserLock(false);
       document.getElementById('mir-helper-cus-not-found-choice')?.remove();
       const overlay = document.createElement('div');
       overlay.id = 'mir-helper-cus-not-found-choice';
@@ -1227,17 +1163,12 @@
     });
   }
   function clearPending() {
-    if (!isExtensionContextAvailable()) {
-      setSisnUserLock(false);
-      return;
-    }
+    if (!isExtensionContextAvailable()) return;
     try {
       chrome.runtime.sendMessage({ type: 'MIR_HELPER_CLEAR_PENDING' });
     } catch (error) {
       console.warn('[Italy MIR Helper] Could not clear pending SISN automation:', error?.message || error);
       if (/Extension context invalidated/i.test(error?.message || String(error))) extensionContextUnavailableResult();
-    } finally {
-      setSisnUserLock(false);
     }
   }
   function findXmlUploadProxyInput() {
@@ -1434,11 +1365,9 @@
       const choice = await promptCusNotFoundChoice(cusCode);
       await closeCusNotFoundDialog();
       if (choice === 'submit-new') {
-        setSisnUserLock(true, 'Continuing SISN automation with “I don’t have any code”. Please wait...');
         showStatus('CUS not found. Restarting with “I don’t have any code”...');
         return false;
       }
-      setSisnUserLock(false);
       showStatus('CUS not found. Automation stopped so you can edit the CUS.', true, 10000);
       clearPending();
       return 'stop';
@@ -1562,11 +1491,7 @@
     automationRunning = true;
     try {
       const pending = await getPending();
-      if (!pending) {
-        setSisnUserLock(false);
-        return;
-      }
-      setSisnUserLock(true, 'SISN automation is running. Please wait until it completes or asks for input.');
+      if (!pending) return;
       if (stopIfAttentionDialog()) return;
       const uploadPage = hasUploadPageText() || hasFileInput();
       const referencePage = hasReferenceCodePageText();
@@ -1600,8 +1525,7 @@
       }
       if (referencePage || /#\/?$/.test(location.hash || '')) {
         if (pending?.cusLookup?.pending) {
-          setSisnUserLock(true, 'Waiting for the CRM CUS lookup. SISN will stay locked until the lookup finishes.');
-          showStatus('Waiting for CRM CUS lookup while SISN loads...');
+          showStatus('Waiting for GCH CUS lookup while SISN loads...');
           return;
         }
         const cusCode = String(pending?.cusCode || '').trim();
@@ -1620,7 +1544,6 @@
     } catch (error) {
       showStatus(`SISN automation failed: ${error?.message || String(error)}`, true);
       console.error('[Italy MIR Helper] SISN automation error:', error);
-      clearPending();
     } finally {
       automationRunning = false;
     }

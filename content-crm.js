@@ -32,7 +32,7 @@
   let cusLookupState = { key: '', promise: null, searchedEventNumber: '' };
   let regulatoryReportsContainerCache = null;
   let regulatoryReportRowsCache = null;
-  console.info('[Italy MIR Helper] CRM content script loaded:', {
+  console.info('[Italy MIR Helper] GCH content script loaded:', {
     url: location.href,
     frame: window.top === window ? 'top' : 'iframe'
   });
@@ -42,7 +42,7 @@
     event.stopImmediatePropagation?.();
     event.stopPropagation?.();
   }
-  function ensureCrmLockOverlay(message = 'Looking up CUS in CRM. Please wait...') {
+  function ensureCrmLockOverlay(message = 'Looking up CUS in GCH. Please wait...') {
     if (window.top !== window || !document.documentElement) return;
     let overlay = document.getElementById(CRM_LOCK_OVERLAY_ID);
     if (!overlay) {
@@ -66,7 +66,7 @@
         crmLockInstalled = true;
       }
       ensureCrmLockOverlay(message);
-      console.info('[Italy MIR Helper] CRM user editing locked for automated CUS lookup:', {
+      console.info('[Italy MIR Helper] GCH user editing locked for automated CUS lookup:', {
         frame: window.top === window ? 'top' : 'iframe',
         url: location.href
       });
@@ -433,7 +433,7 @@
   }
   async function performQuickSearch(eventNumber, timeoutMs = 8000) {
     const input = await waitFor(findQuickSearchInput, timeoutMs, 50);
-    if (!input) throw new Error('Could not find the CRM quick-search input.');
+    if (!input) throw new Error('Could not find the GCH quick-search input.');
     ensureElementInView(input);
     input.focus?.();
     setInputValue(input, eventNumber);
@@ -558,7 +558,7 @@
       const containers = getRegulatoryReportsContainers();
       return containers.length ? containers : null;
     }, 45000, 100);
-    if (!found?.length) throw new Error('Could not find the CRM Regulatory Report section.');
+    if (!found?.length) throw new Error('Could not find the GCH Regulatory Report section.');
     for (const container of found) {
       await expandRegulatoryReportsContainer(container);
       await sleep(100);
@@ -815,7 +815,7 @@
   async function findCusForEvent({ eventNumber, pliNumber }) {
     const key = `${eventNumber || ''}-${pliNumber || ''}`;
     if (cusLookupState.promise && cusLookupState.key === key) {
-      console.info('[Italy MIR Helper] Reusing in-flight CRM CUS lookup:', key);
+      console.info('[Italy MIR Helper] Reusing in-flight GCH CUS lookup:', key);
       return cusLookupState.promise;
     }
     cusLookupState.key = key;
@@ -894,7 +894,7 @@
       return;
     }
     const eventInfo = getEventInfoFromSubject();
-    console.info('[Italy MIR Helper] CRM event info before XML click:', eventInfo);
+    console.info('[Italy MIR Helper] GCH event info before XML click:', eventInfo);
     const startButton = document.getElementById('mir-helper-start');
     if (startButton) startButton.disabled = true;
     setStatus('Double-clicking the XML filename...');
@@ -956,7 +956,7 @@
     if (conditionMet !== lastConditionState) {
       lastConditionState = conditionMet;
       if (!conditionMet) userDismissed = false;
-      console.info('[Italy MIR Helper] CRM condition check:', {
+      console.info('[Italy MIR Helper] GCH condition check:', {
         bcc,
         xml,
         conditionMet,
