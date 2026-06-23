@@ -306,7 +306,9 @@
     };
   }
   function findQuickSearchInput() {
-    return document.getElementById('C17_W52_V53_SearchValue') ||
+    return document.getElementById('C12_W37_V38_SearchValue') ||
+      document.getElementById('C17_W52_V53_SearchValue') ||
+      document.querySelector('input.th-sif[id$="_SearchValue"]') ||
       document.querySelector('input[id$="_SearchValue"]') ||
       document.querySelector('input[tempname$="_search_value"]') ||
       Array.from(document.querySelectorAll('input')).find((el) => /search[_-]?value|quicksearch/i.test(`${el.id} ${el.name} ${el.getAttribute('tempname') || ''}`));
@@ -324,12 +326,14 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
   async function performQuickSearch(eventNumber) {
-    const input = await waitFor(findQuickSearchInput, 30000, 500);
+    const input = await waitFor(findQuickSearchInput, 12000, 100);
     if (!input) throw new Error('Could not find the CRM quick-search input.');
-    input.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    input.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
     input.focus?.();
     setInputValue(input, eventNumber);
-    await sleep(300);
+    if (typeof window.thtmlbAutoSave === 'function') window.thtmlbAutoSave(input);
+    if (typeof window.thtmlb_toggleInput === 'function') window.thtmlb_toggleInput(input);
+    await sleep(50);
     const go = findQuickSearchGo();
     if (go) {
       const point = centerOfElement(go);
