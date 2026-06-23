@@ -348,35 +348,26 @@ function fileInputSetParams(inputInfo, filePath) {
   else if (inputInfo?.objectId) params.objectId = inputInfo.objectId;
   return params;
 }
-async function dispatchFileEventsInPage(target) {
-  return await debuggerSendCommand(target, 'Runtime.evaluate', {
-    expression: `(() => {
-      const seen = new Set();
-      const inputs = [];
-      function visit(node) {
-        if (!node || seen.has(node)) return;
-        seen.add(node);
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          if (node.matches && node.matches('input[type="file"]')) inputs.push(node);
-          if (node.shadowRoot) visit(node.shadowRoot);
-        }
-        const children = node.children || node.childNodes || [];
-        for (const child of Array.from(children)) visit(child);
-      }
-      visit(document);
-      inputs.sort((a, b) => {
-        const score = (input) => {
-          const joined = [input.accept, input.name, input.id, input.className, input.getAttribute('aria-label'), input.getAttribute('label')].join(' ').toLowerCase();
-          let value = 0;
-          if (/xml/.test(input.accept || '')) value -= 100;
-          if (/xml/.test(joined)) value -= 50;
-          if (/upload/.test(joined)) value -= 25;
-          return value;
-        };
-        return score(a) - score(b);
-      });
-      const input = inputs[0] || null;
-      if (!input) return { ok: false, reason: 'no input', inputCount: inputs.length };
+async function resolveInputObjectId(target, inputInfo) {
+  if (inputInfo?.objectId) return inputInfo.objectId;
+  if (inputInfo?.nodeId || inputInfo?.backendNodeId) {
+    const params = { objectGroup: 'mir-helper' };
+    if (inputInfo.nodeId) params.nodeId = inputInfo.nodeId;
+    if (inputInfo.backendNodeId) params.backendNodeId = inputInfo.backendNodeId;
+    const resolved = await debuggerSendCommand(target, 'DOM.resolveNode', params);
+    return resolved?.object?.objectId || '';
+  }
+  return '';
+}
+async function dispatchFileEventsInPage(target, inputInfo) {
+  const objectId = await resolveInputObjectId(target, inputInfo);
+  if (!objectId) {
+    throw new Error('Could not resolve SISN file input after setting XML file.');
+  }
+  return await debuggerSendCommand(target, 'Runtime.callFunctionOn', {
+    objectId,
+    functionDeclaration: `function () {
+      const input = this;
       const eventInit = { bubbles: true, composed: true };
       for (const eventName of ['input', 'change']) {
         input.dispatchEvent(new Event(eventName, eventInit));
@@ -390,7 +381,9 @@ async function dispatchFileEventsInPage(target) {
         }
         root = root.host.getRootNode && root.host.getRootNode();
       }
-      const composedTarget = input.closest && input.closest('form, ds-input-upload, ds-input-upload-core, .form-field');
+      const composedTarget =
+        input.closest &&
+        input.closest('form, ds-input-upload, ds-input-upload-core, .form-field');
       if (composedTarget) {
         for (const eventName of ['input', 'change']) {
           composedTarget.dispatchEvent(new Event(eventName, eventInit));
@@ -398,14 +391,13 @@ async function dispatchFileEventsInPage(target) {
       }
       return {
         ok: true,
-        inputCount: inputs.length,
-        files: Array.from(input.files || []).map(f => f.name),
+        files: Array.from(input.files || []).map((file) => file.name),
         accept: input.accept || '',
         name: input.name || '',
         id: input.id || '',
         hosts
       };
-    })()`,
+    }`,
     awaitPromise: true,
     returnByValue: true
   });
@@ -425,7 +417,7 @@ async function setDownloadedFileOnSisnTab(tabId, filePath) {
       inputInfo
     });
     await debuggerSendCommand(target, 'DOM.setFileInputFiles', fileInputSetParams(inputInfo, filePath));
-    const dispatchResult = await dispatchFileEventsInPage(target);
+    const dispatchResult = await dispatchFileEventsInPage(target, inputInfo);
     console.info('[Italy MIR Helper] SISN file input event dispatch result:', dispatchResult?.result?.value || dispatchResult);
     return { ok: true, inputInfo, dispatchResult: dispatchResult?.result?.value || null };
   } finally {

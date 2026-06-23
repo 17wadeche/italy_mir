@@ -97,7 +97,7 @@
   function clickAt(el, point = null) {
     if (!el) return false;
     try {
-      el.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+      el.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
     } catch (_) {}
     const p = point || centerOf(el);
     const opts = eventOptions(p, 1);
@@ -526,6 +526,17 @@
     if (hasUploadPageText() || hasFileInput()) return false;
     if (!/create-report-module/i.test(location.href)) return false;
     return Boolean(findEnabledNextButton()) || /\bnext\b/i.test(document.body?.innerText || document.body?.textContent || '');
+  }
+  async function waitForCusContinueOutcome(timeoutMs = 10000, intervalMs = 100) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (hasCusNotFoundDialog()) return 'cus-not-found';
+      if (hasUploadPageText() || hasFileInput()) return 'upload-page';
+      await sleep(intervalMs);
+    }
+    if (hasCusNotFoundDialog()) return 'cus-not-found';
+    if (hasUploadPageText() || hasFileInput()) return 'upload-page';
+    return 'unknown';
   }
   async function clickUploadContinueAfterXmlSelected() {
     if (uploadContinueClicked) return true;
@@ -1349,8 +1360,8 @@
     }
     showStatus('Opening the XML upload step...');
     clickAt(continueButton);
-    const cusNotFound = await waitFor(hasCusNotFoundDialog, 10000, 300);
-    if (cusNotFound) {
+    const outcome = await waitForCusContinueOutcome(10000, 100);
+    if (outcome === 'cus-not-found') {
       const choice = await promptCusNotFoundChoice(cusCode);
       await closeCusNotFoundDialog();
       if (choice === 'submit-new') {
@@ -1439,9 +1450,8 @@
     lastUploadAttemptAt = Date.now();
     uploadAttemptRunning = true;
     try {
-      showStatus('Preparing the XML upload field...');
-      await primeXmlUploadControl();
       showStatus('Selecting the downloaded XML file...');
+      primeXmlUploadControl();
       console.info('[Italy MIR Helper] Requesting latest XML download upload. Deep file inputs:', getFileInputsDeep().length);
       const response = await sendUploadMessage();
       if (!response?.ok) {
