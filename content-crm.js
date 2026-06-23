@@ -324,18 +324,19 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
   async function performQuickSearch(eventNumber) {
-    const input = await waitFor(findQuickSearchInput, 30000, 500);
+    const input = await waitFor(findQuickSearchInput, 30000, 100);
     if (!input) throw new Error('Could not find the CRM quick-search input.');
-    input.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    input.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
     input.focus?.();
     setInputValue(input, eventNumber);
-    await sleep(300);
     const go = findQuickSearchGo();
     if (go) {
       const point = centerOfElement(go);
       activateElement(go, point);
     } else {
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      for (const eventName of ['keydown', 'keypress', 'keyup']) {
+        input.dispatchEvent(new KeyboardEvent(eventName, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      }
     }
   }
   function centerOfElement(el) {
@@ -427,7 +428,7 @@
     if (cusLookupState.searchedEventNumber !== eventNumber) {
       await performQuickSearch(eventNumber);
       cusLookupState.searchedEventNumber = eventNumber;
-      await waitFor(() => getRegulatoryReportsContainer() || /regulatory report/i.test(getElementText(document.body)), 15000, 300);
+      await waitFor(() => getRegulatoryReportsContainer() || /regulatory report/i.test(getElementText(document.body)), 15000, 150);
     }
     await expandRegulatoryReports();
     const reports = await waitFor(() => {
