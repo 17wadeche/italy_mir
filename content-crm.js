@@ -12,6 +12,19 @@
     url: location.href,
     frame: window.top === window ? 'top' : 'iframe'
   });
+  function crmLookupLog(message, details = {}) {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'MIR_HELPER_CRM_LOOKUP_LOG',
+        message,
+        details: {
+          ...details,
+          frame: window.top === window ? 'top' : 'iframe',
+          url: location.href
+        }
+      });
+    } catch (_) {}
+  }
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
@@ -398,7 +411,7 @@
   function getRegulatoryReportLink(report) {
     const container = getRegulatoryReportsContainer();
     if (!container || !report) {
-      console.info('[Italy MIR Helper] Regulatory Report link lookup skipped:', {
+      crmLookupLog('Regulatory Report link lookup skipped', {
         hasContainer: Boolean(container),
         hasReport: Boolean(report),
         report: summarizeRegulatoryReport(report)
@@ -407,14 +420,14 @@
     }
     if (report.transId) {
       const link = container.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
-      console.info('[Italy MIR Helper] Regulatory Report link lookup by trans id:', {
+      crmLookupLog('Regulatory Report link lookup by trans id', {
         report: summarizeRegulatoryReport(report),
         found: Boolean(link)
       });
       return link;
     }
     const link = getRegulatoryReportRowsByItemNumber(report.itemNumber)[report.matchIndex]?.link || null;
-    console.info('[Italy MIR Helper] Regulatory Report link lookup by duplicate index:', {
+    crmLookupLog('Regulatory Report link lookup by duplicate index', {
       report: summarizeRegulatoryReport(report),
       found: Boolean(link)
     });
@@ -430,7 +443,7 @@
   }
   async function readCusAfterTransIdSearch(report, index, total) {
     if (!report?.transId) return '';
-    console.info('[Italy MIR Helper] Searching Regulatory Report by transaction id:', {
+    crmLookupLog('Searching Regulatory Report by transaction id', {
       attempt: index + 1,
       total,
       report: summarizeRegulatoryReport(report, index)
@@ -438,7 +451,7 @@
     await performQuickSearch(report.transId);
     await sleep(4000);
     const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
-    console.info('[Italy MIR Helper] RB Acknowledgement result after transaction id search:', {
+    crmLookupLog('RB Acknowledgement result after transaction id search', {
       attempt: index + 1,
       total,
       transId: report.transId,
@@ -454,11 +467,11 @@
       await sleep(4000);
     }
     await expandRegulatoryReports();
-    console.info('[Italy MIR Helper] Starting Regulatory Report CUS lookup:', { eventNumber, pliNumber });
+    crmLookupLog('Starting Regulatory Report CUS lookup', { eventNumber, pliNumber });
     const reports = await waitFor(() => {
       const found = getRegulatoryReportRowsByItemNumber(pliNumber);
       if (!found.length) return null;
-      console.info('[Italy MIR Helper] Regulatory Report rows matching item number:', {
+      crmLookupLog('Regulatory Report rows matching item number', {
         pliNumber,
         count: found.length,
         reports: found.map((report, matchIndex) => summarizeRegulatoryReport({
@@ -480,16 +493,16 @@
       }));
     }, 30000, 500);
     if (!reports?.length) {
-      console.info('[Italy MIR Helper] No Regulatory Report links found for item number:', { pliNumber });
+      crmLookupLog('No Regulatory Report links found for item number', { pliNumber });
       return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
     }
-    console.info('[Italy MIR Helper] Regulatory Report lookup snapshot:', {
+    crmLookupLog('Regulatory Report lookup snapshot', {
       pliNumber,
       count: reports.length,
       reports: reports.map(summarizeRegulatoryReport)
     });
     for (const [index, report] of reports.entries()) {
-      console.info('[Italy MIR Helper] Attempting Regulatory Report:', {
+      crmLookupLog('Attempting Regulatory Report', {
         attempt: index + 1,
         total: reports.length,
         report: summarizeRegulatoryReport(report, index)
@@ -497,7 +510,7 @@
       await expandRegulatoryReports();
       const link = getRegulatoryReportLink(report);
       if (!link) {
-        console.info('[Italy MIR Helper] Regulatory Report link was not found; falling back to transaction id search:', {
+        crmLookupLog('Regulatory Report link was not found; falling back to transaction id search', {
           attempt: index + 1,
           total: reports.length,
           report: summarizeRegulatoryReport(report, index)
@@ -506,7 +519,7 @@
         if (cusCode) return { ok: true, cusCode };
         continue;
       }
-      console.info('[Italy MIR Helper] Clicking Regulatory Report:', {
+      crmLookupLog('Clicking Regulatory Report', {
         attempt: index + 1,
         total: reports.length,
         transId: report.transId,
@@ -517,7 +530,7 @@
       activateElement(link, centerOfElement(link));
       await sleep(2500);
       let cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
-      console.info('[Italy MIR Helper] RB Acknowledgement result after Regulatory Report click:', {
+      crmLookupLog('RB Acknowledgement result after Regulatory Report click', {
         attempt: index + 1,
         total: reports.length,
         transId: report.transId,

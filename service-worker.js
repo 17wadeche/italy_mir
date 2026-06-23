@@ -517,6 +517,15 @@ async function handleUploadLatestXml(sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;
   (async () => {
+    if (message.type === 'MIR_HELPER_CRM_LOOKUP_LOG') {
+      console.info(`[Italy MIR Helper][CRM lookup] ${message.message || ''}`, {
+        ...message.details,
+        tabId: sender?.tab?.id || null,
+        frameId: sender?.frameId ?? null,
+        senderUrl: sender?.url || ''
+      });
+      return { ok: true };
+    }
     if (message.type === 'MIR_HELPER_OPEN_SISN') {
       return await handleOpenSisn(message, sender);
     }
