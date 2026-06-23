@@ -1168,7 +1168,11 @@
       if (!latest) return latest;
       if (!latest.cusLookupPending) return latest;
     }
-    console.warn('[Italy MIR Helper] CRM CUS lookup still pending; continuing with no-code flow.', pending?.cusLookup);
+    const lookupSummary = pending?.cusLookup
+      ? JSON.stringify(pending.cusLookup, null, 0)
+      : 'no lookup details';
+    console.info(`[Italy MIR Helper] CRM CUS lookup still pending after ${timeoutMs}ms; continuing with no-code flow. ${lookupSummary}`);
+    showStatus('CRM RB Acknowledgement # lookup is still running; continuing without a CUS code.', false, 5000);
     return { ...pending, cusLookupPending: false };
   }
   function sendUploadMessage() {

@@ -640,6 +640,11 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
+    const hasLookupUi = Boolean(findQuickSearchInput() || getRegulatoryReportsContainer());
+    if (!hasLookupUi) {
+      sendResponse({ ok: false, error: 'CRM lookup UI is not in this frame yet.' });
+      return false;
+    }
     (async () => findCusForEvent(message.eventInfo || {}))()
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
