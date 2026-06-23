@@ -363,7 +363,7 @@
     const clicker = container.querySelector('.clicker') || container;
     clicker.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
     activateElement(clicker, centerOfElement(clicker));
-    await sleep(1500);
+    await waitFor(() => !wrapper || getComputedStyle(wrapper).display !== 'none', 5000, 250);
     return container;
   }
   function escapeCssValue(value) {
@@ -427,7 +427,7 @@
     if (cusLookupState.searchedEventNumber !== eventNumber) {
       await performQuickSearch(eventNumber);
       cusLookupState.searchedEventNumber = eventNumber;
-      await sleep(4000);
+      await waitFor(() => getRegulatoryReportsContainer() || /regulatory report/i.test(getElementText(document.body)), 15000, 300);
     }
     await expandRegulatoryReports();
     const reports = await waitFor(() => {
@@ -446,8 +446,7 @@
       if (!link) continue;
       link.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
-      await sleep(2500);
-      const cusCode = await waitFor(readRbAcknowledgement, 12000, 500);
+      const cusCode = await waitFor(readRbAcknowledgement, 12000, 300);
       if (cusCode) return { ok: true, cusCode };
     }
     return { ok: true, cusCode: '', reason: `Regulatory Reports for item number ${pliNumber} did not have an RB Acknowledgement #.` };

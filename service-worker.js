@@ -2,7 +2,7 @@
 const SISN_URL = 'https://sisn.salute.gov.it/app/dmirfe/#/';
 const PENDING_KEY = 'mirHelperPendingSisnStart';
 const MAX_DOWNLOAD_WAIT_MS = 30000;
-const DOWNLOAD_POLL_MS = 1000;
+const DOWNLOAD_POLL_MS = 500;
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[Italy MIR Helper] Installed/updated.');
 });
@@ -414,7 +414,6 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
       duplicateTabId: duplicateTab?.id,
       duplicateUrl: duplicateTab?.url
     });
-    await sleep(5000);
     const endTime = Date.now() + 120000;
     let lastError = '';
     while (Date.now() < endTime) {
@@ -428,7 +427,7 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
       } catch (error) {
         lastError = error?.message || String(error);
       }
-      await sleep(1500);
+      await sleep(750);
     }
     return { ok: false, cusCode: '', error: lastError || 'Timed out waiting for CRM CUS lookup.' };
   } finally {

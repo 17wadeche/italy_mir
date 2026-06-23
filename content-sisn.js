@@ -5,10 +5,9 @@
   const STATUS_ID = 'mir-helper-sisn-status';
   const CHECK_INTERVAL_MS = 1000;
   const MODULE_NEXT_CLICKS_REQUIRED = 4;
-  const MODULE_NEXT_CLICK_DELAY_MS = 8000;
-  const MODULE_PAGE_SETTLE_MS = 3500;
-  const MODULE_PAGE_SETTLE_TIMEOUT_MS = 60000;
-  const AFTER_UPLOAD_CONTINUE_DELAY_MS = 9000;
+  const MODULE_NEXT_CLICK_DELAY_MS = 1500;
+  const MODULE_PAGE_SETTLE_MS = 1200;
+  const MODULE_PAGE_SETTLE_TIMEOUT_MS = 45000;
   let automationRunning = false;
   let uploadAttemptRunning = false;
   let lastPageSignature = '';
@@ -439,8 +438,19 @@
       for (const el of getScrollableElements()) {
         try { el.scrollTop = el.scrollHeight; } catch (_) {}
       }
-      await sleep(300);
+      await sleep(150);
     }
+  }
+  async function waitForModuleTransition(previousFingerprint, timeoutMs = 12000, intervalMs = 250) {
+    const start = Date.now();
+    await sleep(MODULE_NEXT_CLICK_DELAY_MS);
+    while (Date.now() - start < timeoutMs) {
+      if (getBlockingAttentionMessage()) return 'attention';
+      if (!isModuleReportPage() || hasObviousLoadingState()) return 'transitioning';
+      if (getModulePageFingerprint() !== previousFingerprint) return 'changed';
+      await sleep(intervalMs);
+    }
+    return 'unchanged';
   }
   function getModulePageFingerprint() {
     const bodyText = String(document.body?.innerText || document.body?.textContent || '');
@@ -578,9 +588,16 @@
             return { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
           })()
         });
+        const previousFingerprint = getModulePageFingerprint();
         clickAt(nextButton);
         moduleNextClicksDone += 1;
-        await sleep(MODULE_NEXT_CLICK_DELAY_MS);
+        const transitionState = await waitForModuleTransition(previousFingerprint);
+        if (transitionState === 'unchanged') {
+          console.info('[Italy MIR Helper] Module page did not visibly change after NEXT; continuing with normal readiness checks.', {
+            clickNumber,
+            href: location.href
+          });
+        }
         attentionAction = await handleModuleAttentionIfPresent(`after clicking NEXT ${clickNumber}`);
         if (attentionAction === 'recovered') continue;
         if (attentionAction === 'stop') return false;
@@ -1407,7 +1424,6 @@
         const continued = await selectDownloadedXmlOnUploadPage();
         if (continued) {
           showStatus('Waiting for the uploaded report to finish loading.');
-          await sleep(AFTER_UPLOAD_CONTINUE_DELAY_MS);
           const moduleState = await waitForModuleReportPageOrAttention(45000, 500);
           if (moduleState === 'module') await autoAdvanceModulePages();
         }
