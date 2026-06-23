@@ -705,21 +705,31 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message?.type !== 'MIR_HELPER_CRM_FIND_CUS') return false;
-      (async () => {
-        const eventInfo = message.eventInfo || {};
-        console.info('[Italy MIR Helper] CUS lookup message accepted immediately:', eventInfo);
-        return findCusForEvent(eventInfo);
-      })()
-        .then(sendResponse)
-        .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
-      return true;
-    });
-    (async () => findCusForEvent(message.eventInfo || {}))()
+    const input = findQuickSearchInput();
+    if (!input || !isVisibleElement(input)) return false;
+    (async () => {
+      const eventInfo = message.eventInfo || {};
+      console.info('[Italy MIR Helper] CUS lookup accepted by quick-search frame:', {
+        eventNumber: eventInfo.eventNumber,
+        pliNumber: eventInfo.pliNumber,
+        frame: window.top === window ? 'top' : 'iframe',
+        url: location.href
+      });
+      return findCusForEvent(eventInfo);
+    })()
       .then(sendResponse)
-      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      .catch((error) => sendResponse({
+        ok: false,
+        error: error?.message || String(error)
+      }));
     return true;
   });
-  boot();
+  function bootWhenReady() {
+    if (!document.documentElement) {
+      window.setTimeout(bootWhenReady, 25);
+      return;
+    }
+    boot();
+  }
+  bootWhenReady();
 })();
