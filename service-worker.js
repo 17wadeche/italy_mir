@@ -517,13 +517,18 @@ async function handleUploadLatestXml(sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;
   (async () => {
-    if (message.type === 'MIR_HELPER_CRM_LOOKUP_LOG') {
-      console.info(`[Italy MIR Helper][CRM lookup] ${message.message || ''}`, {
+    if (message.type === 'MIR_HELPER_BACKGROUND_LOG' || message.type === 'MIR_HELPER_CRM_LOOKUP_LOG') {
+      const prefix = message.type === 'MIR_HELPER_CRM_LOOKUP_LOG'
+        ? '[Italy MIR Helper][CRM lookup]'
+        : '[Italy MIR Helper]';
+      const details = {
         ...message.details,
         tabId: sender?.tab?.id || null,
         frameId: sender?.frameId ?? null,
         senderUrl: sender?.url || ''
-      });
+      };
+      const level = ['debug', 'info', 'warn', 'error'].includes(message.level) ? message.level : 'info';
+      console[level](`${prefix} ${message.message || ''}`, details);
       return { ok: true };
     }
     if (message.type === 'MIR_HELPER_OPEN_SISN') {

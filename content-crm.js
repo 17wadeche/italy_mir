@@ -8,10 +8,21 @@
   let lastConditionState = false;
   let popupHideTimer = null;
   let cusLookupState = { key: '', promise: null, searchedEventNumber: '' };
-  console.info('[Italy MIR Helper] CRM content script loaded:', {
-    url: location.href,
-    frame: window.top === window ? 'top' : 'iframe'
-  });
+  function sendBackgroundLog(level, message, details = {}) {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'MIR_HELPER_BACKGROUND_LOG',
+        level,
+        message,
+        details: {
+          ...details,
+          frame: window.top === window ? 'top' : 'iframe',
+          url: location.href
+        }
+      });
+    } catch (_) {}
+  }
+  sendBackgroundLog('info', 'CRM content script loaded');
   function crmLookupLog(message, details = {}) {
     try {
       chrome.runtime.sendMessage({
@@ -546,7 +557,7 @@
   async function findCusForEvent({ eventNumber, pliNumber }) {
     const key = `${eventNumber || ''}-${pliNumber || ''}`;
     if (cusLookupState.promise && cusLookupState.key === key) {
-      console.info('[Italy MIR Helper] Reusing in-flight CRM CUS lookup:', key);
+      sendBackgroundLog('info', 'Reusing in-flight CRM CUS lookup', { key });
       return cusLookupState.promise;
     }
     cusLookupState.key = key;
@@ -590,7 +601,7 @@
       ...usefulClickAncestors(startElement),
       ...usefulClickAncestors(targetInfo.parent)
     ]);
-    console.info('[Italy MIR Helper] XML click target:', {
+    sendBackgroundLog('info', 'XML click target', {
       type: targetInfo.type,
       xmlName: targetInfo.xmlName,
       text: String(targetInfo.text || '').slice(0, 120),
@@ -625,7 +636,7 @@
       return;
     }
     const eventInfo = getEventInfoFromSubject();
-    console.info('[Italy MIR Helper] CRM event info before XML click:', eventInfo);
+    sendBackgroundLog('info', 'CRM event info before XML click', eventInfo);
     const startButton = document.getElementById('mir-helper-start');
     if (startButton) startButton.disabled = true;
     setStatus('Double-clicking the XML filename...');
@@ -687,7 +698,7 @@
     if (conditionMet !== lastConditionState) {
       lastConditionState = conditionMet;
       if (!conditionMet) userDismissed = false;
-      console.info('[Italy MIR Helper] CRM condition check:', {
+      sendBackgroundLog('info', 'CRM condition check', {
         bcc,
         xml,
         conditionMet,
