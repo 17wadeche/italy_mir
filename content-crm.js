@@ -417,22 +417,50 @@
     if (regulatoryReportRowsCache?.container === container) return regulatoryReportRowsCache.rows;
     const dataRows = Array.from(container.querySelectorAll('.data'));
     const candidates = dataRows.length ? dataRows : Array.from(container.querySelectorAll('a.GUIDE-sideNav'));
-    const rows = candidates.map((el, index) => {
-      const row = el.matches?.('.data') ? el : el.closest?.('.data');
-      const link = el.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
-      const itemNumberEl = row?.querySelector?.('.item-number');
-      const itemText = getFastElementText(itemNumberEl) || getFastElementText(row || el);
-      const transId = link?.getAttribute?.('data-trans-id') || '';
-      return { row, link, itemText, transId, index };
-    }).filter(({ link }) => link && isEuropeanVigilanceReportLink(link));
+    const rows = candidates
+      .map((el, index) => makeRegulatoryReportRow(el, index))
+      .filter(({ link }) => link && isEuropeanVigilanceReportLink(link));
     if (rows.length) regulatoryReportRowsCache = { container, rows };
     return rows;
   }
-  function getRegulatoryReportRowsByItemNumber(itemNumber) {
+  function makeItemNumberPattern(itemNumber) {
     const item = String(itemNumber || '').trim();
-    if (!item) return [];
+    if (!item) return null;
     const escapedItem = item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const itemNumberPattern = new RegExp(`\\(${escapedItem}\\)\\s*:`, 'i');
+    return new RegExp(`\\(${escapedItem}\\)\\s*:`, 'i');
+  }
+  function makeRegulatoryReportRow(el, index = 0) {
+    const row = el?.matches?.('.data') ? el : el?.closest?.('.data');
+    const link = el?.matches?.('a') ? el : row?.querySelector?.('a.GUIDE-sideNav, a');
+    const itemNumberEl = row?.querySelector?.('.item-number');
+    const itemText = getFastElementText(itemNumberEl) || getFastElementText(row || el);
+    const transId = link?.getAttribute?.('data-trans-id') || '';
+    return { row, link, itemText, transId, index };
+  }
+  function findRegulatoryReportRowsByItemNumberFast(itemNumber, container = getRegulatoryReportsContainer()) {
+    const itemNumberPattern = makeItemNumberPattern(itemNumber);
+    if (!container || !itemNumberPattern) return [];
+    const matches = [];
+    const seenRows = new Set();
+    for (const itemEl of Array.from(container.querySelectorAll('.item-number'))) {
+      if (!itemNumberPattern.test(getFastElementText(itemEl))) continue;
+      const row = itemEl.closest?.('.data') || itemEl.closest?.('tr, [role="row"], li, div');
+      if (!row || seenRows.has(row)) continue;
+      seenRows.add(row);
+      const report = makeRegulatoryReportRow(row, matches.length);
+      if (report.link && isEuropeanVigilanceReportLink(report.link)) matches.push(report);
+    }
+    if (matches.length) return matches;
+    return Array.from(container.querySelectorAll('a.GUIDE-sideNav, a'))
+      .filter(isEuropeanVigilanceReportLink)
+      .map((link, index) => makeRegulatoryReportRow(link, index))
+      .filter(({ itemText }) => itemNumberPattern.test(itemText));
+  }
+  function getRegulatoryReportRowsByItemNumber(itemNumber) {
+    const itemNumberPattern = makeItemNumberPattern(itemNumber);
+    if (!itemNumberPattern) return [];
+    const fastRows = findRegulatoryReportRowsByItemNumberFast(itemNumber);
+    if (fastRows.length) return fastRows;
     return getRegulatoryReportRows().filter(({ itemText }) => itemNumberPattern.test(itemText));
   }
   function getRegulatoryReportLink(report) {
@@ -477,13 +505,13 @@
         itemNumber: pliNumber,
         matchIndex,
         transId: report.transId,
-        title: report.link?.getAttribute?.('title') || getElementText(report.link)
+        title: report.link?.getAttribute?.('title') || getFastElementText(report.link)
       })) : null;
-    }, 30000, 500);
+    }, 30000, 150);
     if (!reports?.length) return { ok: true, cusCode: '', reason: `No Regulatory Report links found for item number ${pliNumber}.` };
     for (const report of reports) {
-      await expandRegulatoryReports();
-      const link = getRegulatoryReportLink(report);
+      const container = await expandRegulatoryReports();
+      const link = getRegulatoryReportLink(report) || findRegulatoryReportRowsByItemNumberFast(report.itemNumber, container)[report.matchIndex]?.link;
       if (!link) continue;
       link.scrollIntoView?.({ behavior: 'auto', block: 'center', inline: 'center' });
       activateElement(link, centerOfElement(link));
