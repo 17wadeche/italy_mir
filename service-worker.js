@@ -435,36 +435,77 @@ async function lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo }) {
     await tabsRemove(duplicateTab?.id);
   }
 }
+async function mergePendingSisnStart(values) {
+  const current = await storageGet(PENDING_KEY);
+  const pending = current?.[PENDING_KEY] || {};
+  if (!pending?.value) return;
+  await storageSet({
+    [PENDING_KEY]: {
+      ...pending,
+      ...values
+    }
+  });
+}
+async function resolveAndStoreXmlDownload({ sinceMs, expectedXmlName }) {
+  try {
+    const download = await findLatestCompletedXmlDownload({ sinceMs, expectedXmlName });
+    if (!download?.filename) {
+      await mergePendingSisnStart({ xmlDownload: { ok: false, pending: false, error: 'No completed XML download found yet.' } });
+      return null;
+    }
+    const xmlDownload = {
+      ok: true,
+      pending: false,
+      id: download.id,
+      filename: download.filename,
+      basename: basename(download.filename),
+      startTime: download.startTime
+    };
+    await mergePendingSisnStart({ xmlDownload });
+    console.info('[Italy MIR Helper] Cached XML download for SISN upload:', xmlDownload);
+    return download;
+  } catch (error) {
+    const message = error?.message || String(error);
+    await mergePendingSisnStart({ xmlDownload: { ok: false, pending: false, error: message } });
+    console.warn('[Italy MIR Helper] XML download pre-resolution failed:', message);
+    return null;
+  }
+}
+async function lookupAndStoreCus({ sourceTabId, eventInfo }) {
+  const lookupResult = await lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo });
+  if (!lookupResult?.ok) {
+    console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
+  }
+  await mergePendingSisnStart({
+    cusCode: lookupResult?.cusCode || '',
+    cusLookup: lookupResult || { ok: false, pending: false, error: 'Unknown CRM CUS lookup error.' }
+  });
+}
 async function handleOpenSisn(message, sender) {
   const now = Date.now();
   const sourceTabId = sender?.tab?.id || null;
   const eventInfo = message?.eventInfo || {};
   const downloadStartedAt = Number(message?.downloadStartedAt || now);
+  const expectedXmlName = message?.xmlName || '';
   const basePayload = {
     value: true,
     createdAt: now,
     downloadStartedAt,
     sourceUrl: sender?.url || sender?.tab?.url || '',
-    expectedXmlName: message?.xmlName || '',
+    expectedXmlName,
     crmTabId: sourceTabId,
     eventInfo,
     cusCode: '',
-    cusLookup: { ok: true, pending: true }
+    cusLookup: { ok: true, pending: true },
+    xmlDownload: { ok: false, pending: true }
   };
   await storageSet({ [PENDING_KEY]: basePayload });
-  const [tab, lookupResult] = await Promise.all([
-    tabsCreate({ url: SISN_URL, active: true }),
-    lookupCusInDuplicateCrmTab({ sourceTabId, eventInfo })
-  ]);
-  if (!lookupResult?.ok) {
-    console.warn('[Italy MIR Helper] CRM CUS lookup failed; continuing with no-code flow.', lookupResult);
-  }
-  await storageSet({
-    [PENDING_KEY]: {
-      ...basePayload,
-      cusCode: lookupResult?.cusCode || '',
-      cusLookup: lookupResult || null
-    }
+  const tab = await tabsCreate({ url: SISN_URL, active: true });
+  lookupAndStoreCus({ sourceTabId, eventInfo }).catch((error) => {
+    console.warn('[Italy MIR Helper] Background CRM CUS lookup failed:', error?.message || String(error));
+  });
+  resolveAndStoreXmlDownload({ sinceMs: downloadStartedAt, expectedXmlName }).catch((error) => {
+    console.warn('[Italy MIR Helper] Background XML download resolution failed:', error?.message || String(error));
   });
   return { ok: true, tabId: tab?.id || null };
 }
@@ -475,7 +516,19 @@ async function handleUploadLatestXml(sender) {
   const pending = result?.[PENDING_KEY] || {};
   const sinceMs = Number(pending.downloadStartedAt || pending.createdAt || Date.now() - 60000);
   const expectedXmlName = pending.expectedXmlName || '';
-  const download = await findLatestCompletedXmlDownload({ sinceMs, expectedXmlName });
+  const cachedDownload = pending.xmlDownload?.ok && pending.xmlDownload?.filename
+    ? {
+      id: pending.xmlDownload.id,
+      filename: pending.xmlDownload.filename,
+      state: 'complete',
+      exists: true,
+      startTime: pending.xmlDownload.startTime
+    }
+    : null;
+  const download = cachedDownload || await findLatestCompletedXmlDownload({ sinceMs, expectedXmlName });
+  if (cachedDownload) {
+    console.info('[Italy MIR Helper] Using cached XML download for SISN upload:', pending.xmlDownload);
+  }
   if (!download?.filename) {
     const recent = await downloadsSearch({
       orderBy: ['-startTime'],
