@@ -39,8 +39,10 @@
       .join(' ');
   }
   function extractCusCode(text) {
-    const match = String(text || '').replace(/\u00a0/g, ' ').match(/\bCUS-\d{2,4}-\d+\b/i);
-    return match ? match[0].toUpperCase() : '';
+    const match = String(text || '')
+      .replace(/\u00a0/g, ' ')
+      .match(/\bCUS[\s-]+\d{2,4}-\d+\b/i);
+    return match ? match[0].replace(/\s+/g, ' ').toUpperCase() : '';
   }
   function getPageSearchText() {
     const parts = [];
