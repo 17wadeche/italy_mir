@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Italy Portal Tool",
-  "version": "1.0.5",
+  "version": "2.0.0",
   "description": "Italy Portal Tool",
   "permissions": [
     "storage",
