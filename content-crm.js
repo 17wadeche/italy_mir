@@ -365,10 +365,11 @@
   }
   function getEventInfoFromSubject() {
     const subject = getSubjectValue();
+    const cusCode = extractCusCode(subject);
     const match = String(subject || '').match(/(?:^|\D)(\d{8,12})-(\d+)(?=\D|$)/);
-    if (!match) return { subject, eventNumber: '', pliNumber: '', rawEventNumber: '' };
-    return {
+    if (!match) return { subject, cusCode, eventNumber: '', pliNumber: '', rawEventNumber: '' };    return {
       subject,
+      cusCode,
       eventNumber: normalizeEventNumber(match[1]),
       rawEventNumber: match[1],
       pliNumber: match[2]

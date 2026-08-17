@@ -534,6 +534,7 @@ async function handleOpenSisn(message, sender) {
   const eventInfo = message?.eventInfo || {};
   const downloadStartedAt = Number(message?.downloadStartedAt || now);
   const expectedXmlName = message?.xmlName || '';
+  const subjectCusCode = String(eventInfo?.cusCode || '').trim();
   const basePayload = {
     value: true,
     createdAt: now,
@@ -542,15 +543,21 @@ async function handleOpenSisn(message, sender) {
     expectedXmlName,
     crmTabId: sourceTabId,
     eventInfo,
-    cusCode: '',
-    cusLookup: { ok: true, pending: true },
+    cusCode: subjectCusCode,
+    cusLookup: subjectCusCode
+      ? { ok: true, pending: false, source: 'subject' }
+      : { ok: true, pending: true },
     xmlDownload: { ok: false, pending: true }
   };
   await storageSet({ [PENDING_KEY]: basePayload });
   const tab = await tabsCreate({ url: SISN_URL, active: true });
-  lookupAndStoreCus({ sourceTabId, eventInfo }).catch((error) => {
-    console.warn('[Italy MIR Helper] Background GCH CUS lookup failed:', error?.message || String(error));
-  });
+  if (subjectCusCode) {
+    console.info('[Italy MIR Helper] Using CUS from the email subject:', subjectCusCode);
+  } else {
+    lookupAndStoreCus({ sourceTabId, eventInfo }).catch((error) => {
+      console.warn('[Italy MIR Helper] Background GCH CUS lookup failed:', error?.message || String(error));
+    });
+  }
   resolveAndStoreXmlDownload({ sinceMs: downloadStartedAt, expectedXmlName }).catch((error) => {
     console.warn('[Italy MIR Helper] Background XML download resolution failed:', error?.message || String(error));
   });
