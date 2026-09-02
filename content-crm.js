@@ -110,8 +110,8 @@
   function extractCusCode(text) {
     const match = String(text || '')
       .replace(/\u00a0/g, ' ')
-      .match(/\bCUS[\s-]+\d{2,4}-\d+\b/i);
-    return match ? match[0].replace(/\s+/g, ' ').toUpperCase() : '';
+      .match(/(?:^|[^a-z0-9])(CUS[\s_-]+\d{2,4}-\d+)(?=$|[^a-z0-9])/i);
+    return match ? match[1].replace(/[\s_-]+/g, '-').toUpperCase() : '';
   }
   function getPageSearchText() {
     const parts = [];
@@ -509,6 +509,10 @@
       containers.push(el);
     };
     document.querySelectorAll('.RegulatoryReports').forEach(add);
+    document.querySelectorAll('a.GUIDE-sideNav, a[title]').forEach((link) => {
+      if (!isEuropeanVigilanceReportLink(link)) return;
+      add(link.closest('.data-wrapper') || link.parentElement?.parentElement);
+    });
     if (!containers.length) {
       const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, legend, .section-header, .title, .header');
       for (const heading of headings) {
@@ -666,6 +670,8 @@
     if (report.transId) {
       const direct = container.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
       if (direct) return direct;
+      const anywhere = document.querySelector(`a.GUIDE-sideNav[data-trans-id="${escapeCssValue(report.transId)}"]`);
+      if (anywhere) return anywhere;
     }
     return getRegulatoryReportRowsByItemNumber(report.itemNumber, container)[report.matchIndex]?.link || null;
   }
