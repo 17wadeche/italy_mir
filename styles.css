@@ -81,6 +81,11 @@
   color: #b00020;
 }
 .mir-helper-sisn-status.mir-helper-cus-retrieved {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  transform: translate(-50%, -50%);
   min-width: 260px;
   border-color: #008a46;
   color: #075c35;

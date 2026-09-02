@@ -12,7 +12,7 @@
   const SCROLL_SETTLE_MS = 150;
   const UPLOAD_SELECTION_SETTLE_MS = 800;
   const UPLOAD_SELECTION_POLL_MS = 100;
-  const CUS_RETRIEVED_DISPLAY_MS = 2500;
+  const CUS_RETRIEVED_DISPLAY_MS = 4000;
   let automationRunning = false;
   let uploadAttemptRunning = false;
   let lastPageSignature = '';
