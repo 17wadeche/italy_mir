@@ -80,6 +80,15 @@
   border-color: #b00020;
   color: #b00020;
 }
+.mir-helper-sisn-status.mir-helper-cus-retrieved {
+  min-width: 260px;
+  border-color: #008a46;
+  color: #075c35;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  white-space: pre-line;
+}
 #mir-helper-cus-not-found-choice {
   position: fixed;
   inset: 0;

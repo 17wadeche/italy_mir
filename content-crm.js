@@ -901,7 +901,13 @@
     setStatus('Double-clicking the XML filename...');
     const downloadStartedAt = Date.now();
     await clickXmlAttachment(targetInfo);
-    setStatus(eventInfo.eventNumber ? `Looking up RB Acknowledgement # for event ${eventInfo.eventNumber}-${eventInfo.pliNumber}...` : 'Opening SISN MIR portal...');
+    setStatus(
+      eventInfo.cusCode
+        ? `CUS found in email subject: ${eventInfo.cusCode}. Opening SISN MIR portal...`
+        : eventInfo.eventNumber
+          ? `Looking up RB Acknowledgement # for event ${eventInfo.eventNumber}-${eventInfo.pliNumber}...`
+          : 'Opening SISN MIR portal...'
+    );
     chrome.runtime.sendMessage({
       type: 'MIR_HELPER_OPEN_SISN',
       xmlName: targetInfo.xmlName || '',

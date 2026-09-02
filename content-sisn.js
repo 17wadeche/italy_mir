@@ -12,6 +12,7 @@
   const SCROLL_SETTLE_MS = 150;
   const UPLOAD_SELECTION_SETTLE_MS = 800;
   const UPLOAD_SELECTION_POLL_MS = 100;
+  const CUS_RETRIEVED_DISPLAY_MS = 2500;
   let automationRunning = false;
   let uploadAttemptRunning = false;
   let lastPageSignature = '';
@@ -21,6 +22,7 @@
   let moduleNextClicksDone = 0;
   let moduleAttentionRecoveryAttempted = false;
   let extensionContextInvalidated = false;
+  let announcedCusCode = '';
   console.info('[Italy MIR Helper] SISN content script loaded:', location.href);
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -139,6 +141,7 @@
     }
     box.textContent = message;
     box.classList.toggle('mir-helper-error', Boolean(isError));
+    box.classList.remove('mir-helper-cus-retrieved');
     if (autoHideMs > 0) {
         statusHideTimer = window.setTimeout(() => {
         const currentBox = document.getElementById(STATUS_ID);
@@ -148,6 +151,14 @@
         statusHideTimer = null;
         }, autoHideMs);
     }
+  }
+  async function announceCusRetrieved(cusCode) {
+    const normalizedCusCode = String(cusCode || '').trim().toUpperCase();
+    if (!normalizedCusCode || announcedCusCode === normalizedCusCode) return;
+    announcedCusCode = normalizedCusCode;
+    showStatus(`CUS retrieved!\n${normalizedCusCode}`);
+    document.getElementById(STATUS_ID)?.classList.add('mir-helper-cus-retrieved');
+    await sleep(CUS_RETRIEVED_DISPLAY_MS);
   }
   function optionRegex() {
     return /\bi\s*don['’]?t\s+have\s+any\s+code\b/i;
@@ -1529,6 +1540,7 @@
           return;
         }
         const cusCode = String(pending?.cusCode || '').trim();
+        if (cusCode) await announceCusRetrieved(cusCode);
         const cusMoveResult = cusCode ? await selectCusAndContinue(cusCode) : false;
         if (cusMoveResult === 'stop') return;
         const moved = cusMoveResult || await selectNoCodeAndContinue();
