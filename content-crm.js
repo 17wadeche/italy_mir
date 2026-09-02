@@ -108,10 +108,11 @@
       .join(' ');
   }
   function extractCusCode(text) {
-    const match = String(text || '')
-      .replace(/\u00a0/g, ' ')
-      .match(/(?:^|[^a-z0-9])(CUS[\s_-]+\d{2,4}-\d+)(?=$|[^a-z0-9])/i);
-    return match ? match[1].replace(/[\s_-]+/g, '-').toUpperCase() : '';
+    const normalizedText = String(text || '').replace(/\u00a0/g, ' ');
+    const standardMatch = normalizedText.match(/\bCUS[\s-]+\d{2,4}-\d+\b/i);
+    if (standardMatch) return standardMatch[0].replace(/\s+/g, ' ').toUpperCase();
+    const delimitedMatch = normalizedText.match(/(?:^|[^a-z0-9])(CUS[\s_-]+\d{2,4}-\d+)(?=$|[^a-z0-9])/i);
+    return delimitedMatch ? delimitedMatch[1].replace(/[\s_-]+/g, '-').toUpperCase() : '';
   }
   function getPageSearchText() {
     const parts = [];
