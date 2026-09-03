@@ -1346,30 +1346,54 @@
     input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true }));
   }
+  async function typeIntoField(input, value) {
+    input.value = '';
+    for (const ch of value) {
+      input.value += ch;
+      input.dispatchEvent(
+        new Event('input', { bubbles: true, composed: true })
+      );
+      await sleep(150);
+    }
+    input.dispatchEvent(
+      new Event('change', { bubbles: true, composed: true })
+    );
+  }
   async function selectCusAndContinue(cusCode) {
-    showStatus(`Selecting CUS and entering ${cusCode}...`);
+    showStatus(`CUS found: ${cusCode}`);
     const option = await waitFor(findDirectCusRadioTarget, 35000, 500);
     if (!option) {
       showStatus('Could not find the CUS option; using no-code flow.', true);
       return false;
     }
+    showStatus('Selecting CUS radio option...');
     await clickDirectRadioOption(option);
     const input = await waitFor(findCusTextInput, 20000, 400);
     if (!input) {
       showStatus('Could not find the CUS entry field; using no-code flow.', true);
       return false;
     }
-    input.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    input.scrollIntoView?.({
+      behavior: 'smooth',
+      block: 'center',
+      inline: 'center'
+    });
     input.focus?.();
-    setTextInputValue(input, cusCode);
-    await sleep(500);
-    const continueButton = await waitFor(findEnabledContinueButton, 15000, 400);
+    showStatus(`Entering CUS: ${cusCode}`);
+    await typeIntoField(input, cusCode);
+    await sleep(750);
+    showStatus(`CUS entered successfully: ${cusCode}`);
+    const continueButton = await waitFor(
+      findEnabledContinueButton,
+      15000,
+      400
+    );
     if (!continueButton) {
       showStatus('CUS needs to be fixed', true);
       clearPending();
       return 'stop';
     }
-    showStatus('Opening the XML upload step...');
+    showStatus('CUS entered. Clicking CONTINUE...');
     clickAt(continueButton);
     const outcome = await waitForCusContinueOutcome(10000, 100);
     if (outcome === 'cus-not-found') {
